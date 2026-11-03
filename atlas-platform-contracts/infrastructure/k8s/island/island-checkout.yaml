@@ -1,0 +1,138 @@
+# Atlas island deploy — cpuset-free single-node variant (M8 dev mode).
+#
+# Runs the checkout path as hostNetwork pods on the island netns (no CNI,
+# no kube-proxy): each owner binds a distinct port directly on 10.0.2.100.
+# Stateful infra stays on the compose host and is reached via the slirp
+# gateway 10.0.2.2 (= host loopback, where compose publishes). Kafka's
+# advertised listener resolves through spec.hostAliases. Images imported
+# into the island containerd (imagePullPolicy Never). This is a DEV
+# topology for benchmarks/smoke, not the production shape (see k8s/).
+#
+# CONSTRAINT (proven 2026-11-03): the host kernel (7.2.11-ogc4.1) refuses
+# delegating the memory/io controllers into the user tree (ENOTS even for
+# container root), and kubelet hard-requires the memory controller in
+# cgroup v2 — pods therefore CANNOT start under user mzet on this host.
+# Fix once with host root (see sdd/evidence/EVD-008-002) or use an
+# external cluster; the manifests below are the ready-to-apply shape.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: atlas
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: catalog-api
+  namespace: atlas
+  labels: { app: catalog-api }
+spec:
+  hostNetwork: true
+  tolerations:
+    - { operator: Exists }
+  hostAliases:
+    - { ip: "10.0.2.2", hostnames: [kafka] }
+  containers:
+    - name: catalog
+      image: docker.io/library/atlas-base-catalog-api:latest
+      imagePullPolicy: Never
+      command: ["uvicorn", "atlas_catalog.main:app", "--host", "0.0.0.0", "--port", "8101"]
+      env:
+        - { name: MONGO_URL, value: "mongodb://10.0.2.2:27017/catalog?replicaSet=rs0&directConnection=true" }
+        - { name: KAFKA_BOOTSTRAP, value: "kafka:29092" }
+        - { name: PG_DSN, value: "postgresql://postgres:atlas-pg-dev-only@10.0.2.2:5432/atlas" }
+        - { name: OTEL_SDK_DISABLED, value: "true" }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: inventory-api
+  namespace: atlas
+  labels: { app: inventory-api }
+spec:
+  hostNetwork: true
+  tolerations:
+    - { operator: Exists }
+  hostAliases:
+    - { ip: "10.0.2.2", hostnames: [kafka] }
+  containers:
+    - name: inventory
+      image: docker.io/library/atlas-base-inventory-api:latest
+      imagePullPolicy: Never
+      command: ["uvicorn", "atlas_inventory.main:app", "--host", "0.0.0.0", "--port", "8104"]
+      env:
+        - { name: MONGO_URL, value: "mongodb://10.0.2.2:27017/inventory?replicaSet=rs0&directConnection=true" }
+        - { name: KAFKA_BOOTSTRAP, value: "kafka:29092" }
+        - { name: PG_DSN, value: "postgresql://postgres:atlas-pg-dev-only@10.0.2.2:5432/atlas" }
+        - { name: OTEL_SDK_DISABLED, value: "true" }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: psp-fake
+  namespace: atlas
+  labels: { app: psp-fake, dev-only: "true" }
+spec:
+  hostNetwork: true
+  tolerations:
+    - { operator: Exists }
+  containers:
+    - name: psp
+      image: docker.io/library/atlas-base-psp-fake:latest
+      imagePullPolicy: Never
+      command: ["uvicorn", "atlas_psp_fake.app:app", "--host", "0.0.0.0", "--port", "8190"]
+      env:
+        - { name: PSP_CALLBACK_URL, value: "http://10.0.2.100:8105/webhooks/psp" }
+        - { name: PSP_WEBHOOK_SECRET, value: "psp-dev-secret-change-me" }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: payment-api
+  namespace: atlas
+  labels: { app: payment-api }
+spec:
+  hostNetwork: true
+  tolerations:
+    - { operator: Exists }
+  hostAliases:
+    - { ip: "10.0.2.2", hostnames: [kafka] }
+  containers:
+    - name: payment
+      image: docker.io/library/atlas-base-payment-api:latest
+      imagePullPolicy: Never
+      command: ["uvicorn", "atlas_payment.main:app", "--host", "0.0.0.0", "--port", "8105"]
+      env:
+        - { name: MONGO_URL, value: "mongodb://10.0.2.2:27017/payment?replicaSet=rs0&directConnection=true" }
+        - { name: KAFKA_BOOTSTRAP, value: "kafka:29092" }
+        - { name: PG_DSN, value: "postgresql://postgres:atlas-pg-dev-only@10.0.2.2:5432/atlas" }
+        - { name: PSP_BASE_URL, value: "http://10.0.2.100:8190" }
+        - { name: PSP_TIMEOUT_SECONDS, value: "10" }
+        - { name: PSP_WEBHOOK_SECRET, value: "psp-dev-secret-change-me" }
+        - { name: OTEL_SDK_DISABLED, value: "true" }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: order-api
+  namespace: atlas
+  labels: { app: order-api }
+spec:
+  hostNetwork: true
+  tolerations:
+    - { operator: Exists }
+  hostAliases:
+    - { ip: "10.0.2.2", hostnames: [kafka] }
+  containers:
+    - name: order
+      image: docker.io/library/atlas-base-order-api:latest
+      imagePullPolicy: Never
+      command: ["uvicorn", "atlas_order.main:app", "--host", "0.0.0.0", "--port", "8106"]
+      env:
+        - { name: MONGO_URL, value: "mongodb://10.0.2.2:27017/order?replicaSet=rs0&directConnection=true" }
+        - { name: KAFKA_BOOTSTRAP, value: "kafka:29092" }
+        - { name: PG_DSN, value: "postgresql://postgres:atlas-pg-dev-only@10.0.2.2:5432/atlas" }
+        - { name: INVENTORY_API_URL, value: "http://10.0.2.100:8104" }
+        - { name: PAYMENT_API_URL, value: "http://10.0.2.100:8105" }
+        - { name: WAREHOUSES, value: "W1,W2" }
+        - { name: ORDER_PENDING_TTL_SECONDS, value: "1800" }
+        - { name: OTEL_SDK_DISABLED, value: "true" }

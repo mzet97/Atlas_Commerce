@@ -88,3 +88,44 @@ python3 validate.py                      # ALL PASS (18 Deployments, 14 Services
 kubeconform -strict -summary -ignore-missing-schemas *.yaml
 ./deploy.sh                              # num cluster com kubectl configurado
 ```
+
+
+## Investigação de desbloqueio #2 (2026-11-03, sudo local — resultado DEFINITIVO)
+Executando a receita com o sudo disponível (dentro da user namespace do
+container ZCode/distrobox — uid_map `0 1 1000`):
+- `ip_forward`: gravável em **netns próprio** (`unshare -n` — sysctl é
+  namespaced) → não é bloqueador (provado com slirp4netns anexado,
+  internet OK no netns).
+- k3s server **sem agente** (`--disable-agent`): sobe limpo (etcd/CM/
+  scheduler Healthy; o pre-flight de cpuset pertence ao AGENT).
+- kubelet standalone (binário oficial v1.31.5, `cgroups-per-qos=false`,
+  `KubeletInUserNamespace=true`, `--fail-swap-on=false`): registra o node
+  (amdr7, NotReady sem CNI — tolerado) MAS **nenhum pod cria sandbox**:
+  o kernel do host (`7.2.11-ogc4.1`, kernel customizado) retorna
+  **ENOTS ("Operation not supported")** ao delegar os controladores
+  `memory` e `io` na árvore do usuário (`cgroup.subtree_control`), e o
+  runc falha com "cannot enter cgroupv2 /sys/fs/cgroup/k8s.io ... invalid
+  state" (no-internal-process + controllers indisponíveis).
+- Delegação systemd-user testada por drop-ins (user-1000.slice,
+  app.slice, session.slice, `@.service`) + serviço transiente
+  `Delegate=yes`: os controladores que chegam à árvore do usuário são
+  SEMPRE `cpu io memory pids dmem` conforme o pai — `cpuset` e o próprio
+  `memory`(delegação efetiva) exigem unidades do HOST systemd
+  (`/etc/systemd/system/user@.service.d`), i.e. root do host de verdade.
+
+## Conclusão definitiva
+O kubelet **não pode rodar** sob o usuário `mzet` neste host: o kernel
+`7.2.11-ogc4.1` restringe a delegação de `memory`/`io` (ENOTS) e o
+`cpuset` nunca desce na árvore do usuário. Os caminhos são EXATAMENTE
+dois, e ambos dependem de credencial que só o usuário possui:
+1. **Root do host (uma vez)**: `/etc/systemd/system/user@.service.d`
+   delegando `cpu cpuset io memory pids` + restart de user@1000.service
+   (encerra processos do usuário — fazer em logout), depois
+   `podman run ... k3s server` + `./deploy.sh` + L2/L3 (harness pronto).
+2. **Kubeconfig externo**: qualquer cluster; `./deploy.sh` aceita
+   `HOST_INFRA_IP` para alcançar a infraestrutura e os benchmarks L2/L3
+   rodam com o harness k6 parametrizado.
+
+Artefato adicional pronto para o primeiro cluster disponível:
+`infrastructure/k8s/island/island-checkout.yaml` (5 pods hostNetwork do
+caminho de checkout, imagens importadas via `podman save | ctr import`).
