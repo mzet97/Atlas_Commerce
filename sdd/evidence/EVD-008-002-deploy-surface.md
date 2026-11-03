@@ -176,3 +176,18 @@ Usernetes gen3 (`gen3-v20260902.0`) publica **sem binários de release**
 (assets vazio) — exigiria build de source completo. Caminho não seguido
 por custo/risco. O desbloqueio definitivo permanece o comando root único
 documentado acima.
+
+
+## Tentativa final (CRI-O rootless — 2026-11-03, resultado DEFINITIVO)
+CRI-O v1.31.4 rootless (binários oficiais, storage vfs no home, conmonrs,
+pinns/crun/runc próprios): passou das validações de root/log/config e
+fatal na **inicialização do nsmgr**: `mkdir /var/run/netns: permission
+denied` — o diretório de netns do host é init-owned e o usuário não pode
+criá-lo; crio não expõe configuração de caminho de netns para usuário.
+ADICIONANDO ao mapeamento completo: TODAS as rotas de runtime de usuário
+(containerd/k3s/k3d/k3s-rootless/cri-o/usernetes-sem-assets/userns-kubelet)
+chegam a paredes de kernel/filesystem distintas mas equivalentes — o host
+`7.2.11-ogc4.1` + `/run`+`/etc` init-owned + user namespace exigem root do
+host para QUALQUER node Kubernetes. Estado terminal: deploy em cluster e
+benchmarks L2/L3 aguardam EXCLUSIVAMENTE (a) execução da receita de root
+(em EVD-008-002) pelo usuário OU (b) kubeconfig de cluster externo.
