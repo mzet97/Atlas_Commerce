@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+  namespace: atlas
+spec:
+  type: ExternalName
+  externalName: "${HOST_INFRA_IP}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pg
+  namespace: atlas
+spec:
+  type: ExternalName
+  externalName: "${HOST_INFRA_IP}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: atlas
+spec:
+  type: ExternalName
+  externalName: "${HOST_INFRA_IP}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: atlas
+spec:
+  type: ExternalName
+  externalName: "${HOST_INFRA_IP}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: atlas
+spec:
+  type: ExternalName
+  externalName: "${HOST_INFRA_IP}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbit
+  namespace: atlas
+spec:
+  type: ExternalName
+  externalName: "${HOST_INFRA_IP}"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: atlas-infra-endpoints
+  namespace: atlas
+data:
+  # compose publishes these on the host; pods reach them via the node
+  # gateway (dev topology — in-cluster statefulsets are the M8-next step).
+  README: "ExternalName services point at the compose host (HOST_INFRA_IP)."

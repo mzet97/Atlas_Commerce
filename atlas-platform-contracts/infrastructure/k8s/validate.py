@@ -74,15 +74,19 @@ def main() -> None:
     services = [d for d in all_docs if d.get("kind") == "Service"]
     if len(deployments) != 18:
         fail(f"expected 18 Deployments, got {len(deployments)}")
-    if len(services) != 8:
-        fail(f"expected 8 Services, got {len(services)}")
+    if len(services) != 14:
+        fail(f"expected 14 Services (8 owners + 6 infra ExternalName), got {len(services)}")
     for doc in deployments:
         check_deployment(doc)
     wired = set()
     for doc in deployments:
         wired.add(tuple(sorted(doc["spec"]["template"]["metadata"]["labels"].items())))
     for svc in services:
-        sel = tuple(sorted(svc["spec"]["selector"].items()))
+        if svc["spec"].get("type") == "ExternalName":
+            if not svc["spec"].get("externalName"):
+                fail(f"Service {svc['metadata']['name']}: ExternalName needs externalName")
+            continue
+        sel = tuple(sorted(svc["spec"].get("selector", {}).items()))
         if sel not in wired:
             fail(f"Service {svc['metadata']['name']}: selector matches nothing")
     if FAILURES:
