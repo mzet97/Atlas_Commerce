@@ -238,6 +238,104 @@ async def list_pending(request: Request) -> JSONResponse:
     return JSONResponse([_approval_body(row) for row in rows])
 
 
+class SettleIn(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    correlation_id: str
+
+
+@router.post("/settlements/{order_id}")
+async def compute_settlement(
+    order_id: str, body: SettleIn, request: Request
+) -> JSONResponse:
+    """M10 split settlement report (finance_analyst).
+
+    Control reads the projections (orders_view + order_lines + offers) and
+    writes an auditable report to its OWN db: gross per seller, commission
+    (SETTLEMENT_COMMISSION_BPS, default 10%), net. Owners keep canonical
+    state (ADR-0006); payouts execute out of band from this report.
+    """
+    import os
+
+    token = await gate(
+        request, "settlement:compute", order_id, body.correlation_id,
+        FINANCE_ANALYST, None,
+    )
+    pool: asyncpg.Pool = request.app.state.atlas_pool
+    rows = await pool.fetch(
+        "SELECT o.seller_id,"
+        " (ol.quantity * ol.price_minor)::int AS gross_minor"
+        " FROM orders_view ov"
+        " JOIN order_lines ol ON ol.order_id = ov.order_id"
+        " JOIN available_offer_view o ON o.offer_id = ol.offer_id"
+        " WHERE ov.order_id = $1",
+        order_id,
+    )
+    if not rows:
+        return JSONResponse({"detail": "order not found in projections"}, status_code=404)
+    bps = int(os.getenv("SETTLEMENT_COMMISSION_BPS", "1000"))
+    out = []
+    for row in rows:
+        gross = int(row["gross_minor"])
+        commission = gross * bps // 10000
+        net = gross - commission
+        await _pool(request).execute(
+            "INSERT INTO settlements (order_id, seller_id, gross_minor,"
+            " commission_minor, net_minor, computed_by)"
+            " VALUES ($1, $2, $3, $4, $5, $6)"
+            " ON CONFLICT (order_id, seller_id) DO UPDATE SET"
+            " gross_minor = EXCLUDED.gross_minor,"
+            " commission_minor = EXCLUDED.commission_minor,"
+            " net_minor = EXCLUDED.net_minor,"
+            " computed_by = EXCLUDED.computed_by, computed_at = now()",
+            order_id,
+            row["seller_id"],
+            gross,
+            commission,
+            net,
+            token.subject,
+        )
+        await allowed(
+            request, token, "settlement:compute",
+            f"{order_id}/{row['seller_id']}", body.correlation_id,
+        )
+        out.append({
+            "order_id": order_id,
+            "seller_id": row["seller_id"],
+            "gross_minor": gross,
+            "commission_minor": commission,
+            "net_minor": net,
+        })
+    return JSONResponse({"settlements": out, "commission_bps": bps})
+
+
+@router.get("/settlements/{order_id}")
+async def list_settlements(order_id: str, request: Request) -> JSONResponse:
+    """Audited settlement report for one order."""
+    token = await gate(
+        request, "settlement:view", order_id, f"view-{order_id}",
+        FINANCE_ANALYST, None,
+    )
+    rows = await _pool(request).fetch(
+        "SELECT order_id, seller_id, gross_minor, commission_minor, net_minor,"
+        " computed_by, computed_at FROM settlements WHERE order_id = $1",
+        order_id,
+    )
+    await allowed(request, token, "settlement:view", order_id, f"view-{order_id}")
+    return JSONResponse([
+        {
+            "order_id": r["order_id"],
+            "seller_id": r["seller_id"],
+            "gross_minor": r["gross_minor"],
+            "commission_minor": r["commission_minor"],
+            "net_minor": r["net_minor"],
+            "computed_by": r["computed_by"],
+            "computed_at": r["computed_at"].isoformat(),
+        }
+        for r in rows
+    ])
+
+
 @router.post("/approvals/{approval_id}/approve")
 async def approve(
     approval_id: str, body: DecideIn, request: Request

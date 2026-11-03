@@ -76,7 +76,7 @@ def _checkout(tag: str, price_minor: int) -> tuple[str, str, int]:
                  {"expected_version": 1, "correlation_id": f"c-{tag}"}, cara)
     assert s == 200, _
     s, offer = _call(CONTROL, "POST", "/ops/offers", {
-        "sku_id": sku, "seller_id": "m6r", "market_id": "BR", "channel": "web",
+        "sku_id": sku, "seller_id": "atlas", "market_id": "BR", "channel": "web",
         "currency": "BRL", "price_minor": price_minor,
         "idempotency_key": f"o-{tag}", "correlation_id": f"c-{tag}"}, cara)
     assert s == 201, offer

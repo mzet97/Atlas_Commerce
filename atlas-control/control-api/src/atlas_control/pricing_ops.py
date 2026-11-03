@@ -13,6 +13,7 @@ from .command_channel import ScopeGrant, allowed, forward, gate, json_out
 
 router = APIRouter(prefix="/ops/offers")
 CATALOG_EDITOR = "catalog_editor"
+SELLER_OPERATOR = "seller_operator"
 
 
 class PublishOfferIn(BaseModel):
@@ -49,15 +50,31 @@ def _market_scope(market_id: str) -> list[ScopeGrant]:
 
 @router.post("", status_code=201)
 async def publish_offer(body: PublishOfferIn, request: Request) -> JSONResponse:
-    """Operator publishes an offer for a granted market. Others 403 + audit."""
-    token = await gate(
-        request,
-        "offer:publish",
-        None,
-        body.correlation_id,
-        CATALOG_EDITOR,
-        _market_scope(body.market_id),
-    )
+    """Operator publishes an offer. Others 403 + audit.
+
+    M10 tenancy: 1P (seller_id == atlas) keeps the catalog_editor+market
+    gate; a 3P seller_id requires seller_operator + a (seller, id) grant —
+    publishing for a foreign tenant is 403 + audited (zero violation).
+    """
+    if body.seller_id == "atlas":
+        token = await gate(
+            request,
+            "offer:publish",
+            None,
+            body.correlation_id,
+            CATALOG_EDITOR,
+            _market_scope(body.market_id),
+        )
+    else:
+        token = await gate(
+            request,
+            "offer:publish",
+            None,
+            body.correlation_id,
+            SELLER_OPERATOR,
+            [ScopeGrant(scope_type="seller", scope_id=body.seller_id),
+             ScopeGrant(scope_type="market", scope_id=body.market_id)],
+        )
     status, offer = await forward(
         request,
         "offers_url",

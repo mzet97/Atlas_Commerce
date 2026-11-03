@@ -153,6 +153,7 @@ class PaymentIntent:
     provider_ref: str | None = None
     decline_code: str | None = None
     refunded_minor: int = 0
+    authorized_at: str | None = None
     events: list[DomainEvent] = field(default_factory=list, repr=False)
 
     @classmethod
@@ -230,6 +231,7 @@ class PaymentIntent:
         if self.status not in (INITIATED, UNKNOWN):
             raise InvalidTransition(status=self.status, event="authorize")
         self.provider_ref = provider_ref
+        self.authorized_at = datetime.now(UTC).isoformat()
         return self._transition("PaymentAuthorized", AUTHORIZED, correlation_id)
 
     def decline(

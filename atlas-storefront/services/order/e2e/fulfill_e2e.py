@@ -68,7 +68,7 @@ def setup_confirmed() -> str:
     _call(CONTROL, "POST", f"/ops/products/{sku}/publish",
           {"expected_version": 1, "correlation_id": f"c-{tag}"}, cara)
     _, offer = _call(CONTROL, "POST", "/ops/offers", {
-        "sku_id": sku, "seller_id": "m6-s", "market_id": "BR", "channel": "web",
+        "sku_id": sku, "seller_id": "atlas", "market_id": "BR", "channel": "web",
         "currency": "BRL", "price_minor": 333,
         "idempotency_key": f"o-{tag}", "correlation_id": f"c-{tag}"}, cara)
     _call(INVENTORY, "POST", "/positions/receive", {

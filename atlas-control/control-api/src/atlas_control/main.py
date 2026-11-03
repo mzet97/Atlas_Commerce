@@ -25,6 +25,7 @@ from .finance_ops import router as finance_router
 from .fulfillment_ops import router as fulfillment_router
 from .order_ops import router as order_router
 from .pricing_ops import router as pricing_router
+from .seller_ops import router as seller_router
 from .stock_ops import router as stock_router
 
 _resource = Resource.create({"service.name": os.getenv("OTEL_SERVICE_NAME", "atlas-control")})
@@ -68,6 +69,7 @@ app.include_router(order_router)
 app.include_router(finance_router)
 app.include_router(fulfillment_router)
 app.include_router(ai_router)
+app.include_router(seller_router)
 FastAPIInstrumentor.instrument_app(app)
 
 

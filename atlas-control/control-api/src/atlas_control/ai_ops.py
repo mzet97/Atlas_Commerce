@@ -24,6 +24,8 @@ class AllowIn(BaseModel):
     offer_id: str
     reason: str = ""
     correlation_id: str = ""
+    weight: float = 1.0
+    expires_at: str | None = None  # ISO-8601; null = curated until removed
 
 
 def _pool(request: Request) -> asyncpg.Pool:
@@ -35,22 +37,39 @@ def _pool(request: Request) -> asyncpg.Pool:
 
 @router.post("/allowlist", status_code=201)
 async def allow_offer(body: AllowIn, request: Request) -> JSONResponse:
-    """Curator allowlists an offer for AI surfacing. Idempotent re-add."""
+    """Curator allowlists an offer for AI surfacing. Idempotent re-add.
+
+    weight feeds the storefront ranking; expires_at is the curation TTL
+    (M7 gate): expired rows silently stop surfacing, no rewrite needed.
+    """
     token = await gate(
         request, "ai:allow", body.offer_id, body.correlation_id,
         CATALOG_EDITOR, None,
     )
     row = await _pool(request).fetchrow(
-        "INSERT INTO ai_allowlist (offer_id, reason) VALUES ($1, $2)"
-        " ON CONFLICT (offer_id) DO UPDATE SET reason = EXCLUDED.reason"
-        " RETURNING offer_id, reason",
+        "INSERT INTO ai_allowlist (offer_id, reason, weight, expires_at)"
+        " VALUES ($1, $2, $3, $4)"
+        " ON CONFLICT (offer_id) DO UPDATE SET reason = EXCLUDED.reason,"
+        " weight = EXCLUDED.weight, expires_at = EXCLUDED.expires_at"
+        " RETURNING offer_id, reason, weight, expires_at",
         body.offer_id,
         body.reason,
+        body.weight,
+        body.expires_at,
     )
     assert row is not None
     await allowed(request, token, "ai:allow", body.offer_id, body.correlation_id)
-    return JSONResponse({"offer_id": row["offer_id"], "reason": row["reason"]},
-                        status_code=201)
+    return JSONResponse(
+        {
+            "offer_id": row["offer_id"],
+            "reason": row["reason"],
+            "weight": float(row["weight"]),
+            "expires_at": (
+                row["expires_at"].isoformat() if row["expires_at"] else None
+            ),
+        },
+        status_code=201,
+    )
 
 
 @router.delete("/allowlist/{offer_id}")

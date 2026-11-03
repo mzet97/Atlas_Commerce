@@ -58,6 +58,7 @@ mkuser gina.fulfillment "gina-dev-only" fulfillment_operator "gina@example.com" 
 mkuser boss.admin "boss-dev-only" iam_admin "boss@example.com" Boss Admin
 mkuser cara.catalog "cara-dev-only" catalog_editor "cara@example.com" Cara Catalog
 mkuser pam.pricing "pam-dev-only" pricing_manager "pam@example.com" Pam Pricing
+mkuser paul.seller "paul-dev-only" seller_operator "paul@example.com" Paul Seller
 # cara also operates stock in the demo (separate role, least privilege kept:
 # no pricing/finance roles, scopes below).
 ID=$(curl -s -m 15 "$API/atlas/users?username=cara.catalog" -H "Authorization: Bearer $T" \
@@ -92,6 +93,10 @@ if [ -n "${PG_PASSWORD:-}" ]; then
   PAM=$(curl -s -m 15 "$API/atlas/users?username=pam.pricing" -H "Authorization: Bearer $T" \
     | python3 -c "import sys,json;print(json.load(sys.stdin)[0]['id'])")
   grant "$PAM" "market" "BR"
+  PAUL=$(curl -s -m 15 "$API/atlas/users?username=paul.seller" -H "Authorization: Bearer $T" \
+    | python3 -c "import sys,json;print(json.load(sys.stdin)[0]['id'])")
+  grant "$PAUL" "seller" "seller-acme"
+  grant "$PAUL" "market" "BR"
 else
   echo "PG_PASSWORD unset: scope grants NOT seeded (run with compose .env sourced)"
 fi

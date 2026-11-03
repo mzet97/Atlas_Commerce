@@ -47,6 +47,7 @@ class MongoPaymentRepository:
             "provider_ref": i.provider_ref,
             "decline_code": i.decline_code,
             "refunded_minor": i.refunded_minor,
+            "authorized_at": i.authorized_at,
         }
 
     @staticmethod
@@ -68,6 +69,7 @@ class MongoPaymentRepository:
             provider_ref=str(provider) if provider is not None else None,
             decline_code=str(decline) if decline is not None else None,
             refunded_minor=int(doc.get("refunded_minor", 0)),  # type: ignore[arg-type]
+            authorized_at=(str(doc["authorized_at"]) if doc.get("authorized_at") else None),
         )
 
     async def initiate(self, intent: PaymentIntent) -> PaymentIntent:
@@ -171,6 +173,21 @@ class MongoPaymentRepository:
     async def find_refund(self, idempotency_key: str) -> dict[str, object] | None:
         doc = await self._db.refunds.find_one({"idempotency_key": idempotency_key})
         return dict(doc) if doc is not None else None
+
+    async def count_authorized_since(self, customer_id: str, since_epoch: float) -> int:
+        """Velocity antifraude counter (M10): authorized intents per customer
+        inside the window. The `occurred_at` ISO timestamp of the last event
+        is compared lexicographically via a stored authorized_at float."""
+        from datetime import UTC, datetime
+
+        cutoff = datetime.fromtimestamp(since_epoch, UTC).isoformat()
+        return await self._db.intents.count_documents(
+            {
+                "customer_id": customer_id,
+                "status": AUTHORIZED,
+                "authorized_at": {"$gte": cutoff},
+            }
+        )
 
     async def refund_with_events(
         self,

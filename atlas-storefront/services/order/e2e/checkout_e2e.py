@@ -78,7 +78,7 @@ def setup_offer() -> tuple[str, str]:
                  {"expected_version": 1, "correlation_id": f"e2e-{tag}"}, auth)
     assert s == 200, _
     s, offer = _call(CONTROL, "POST", "/ops/offers", {
-        "sku_id": sku, "seller_id": "e2e-seller", "market_id": "BR",
+        "sku_id": sku, "seller_id": "atlas", "market_id": "BR",
         "channel": "web", "currency": "BRL", "price_minor": 333,
         "idempotency_key": f"e2e-offer-{tag}", "correlation_id": f"e2e-{tag}"},
         auth)

@@ -35,7 +35,7 @@ const JOINS = `
   LEFT JOIN LATERAL (
     SELECT * FROM available_offer_view o
     WHERE o.sku_id = p.product_id AND o.status = 'ACTIVE'
-    ORDER BY o.projection_version DESC LIMIT 1
+    ORDER BY o.price_minor ASC, o.projection_version DESC LIMIT 1
   ) o ON true
   LEFT JOIN LATERAL (
     SELECT SUM(on_hand - reserved - safety_stock)::int AS total_available
@@ -110,7 +110,7 @@ export async function searchProducts(
      LEFT JOIN LATERAL (
        SELECT * FROM available_offer_view o
        WHERE o.sku_id = p.product_id AND o.status = 'ACTIVE'
-       ORDER BY o.projection_version DESC LIMIT 1
+       ORDER BY o.price_minor ASC, o.projection_version DESC LIMIT 1
      ) o ON true
      ${filters}`,
     params,
@@ -133,7 +133,7 @@ export async function searchProducts(
      LEFT JOIN LATERAL (
        SELECT * FROM available_offer_view o
        WHERE o.sku_id = p.product_id AND o.status = 'ACTIVE'
-       ORDER BY o.projection_version DESC LIMIT 1
+       ORDER BY o.price_minor ASC, o.projection_version DESC LIMIT 1
      ) o ON true
      WHERE p.title ILIKE '%' || $1 || '%' OR similarity(p.title, $1) > 0.3
      GROUP BY o.market_id ORDER BY count DESC`,
@@ -145,7 +145,7 @@ export async function searchProducts(
      LEFT JOIN LATERAL (
        SELECT * FROM available_offer_view o
        WHERE o.sku_id = p.product_id AND o.status = 'ACTIVE'
-       ORDER BY o.projection_version DESC LIMIT 1
+       ORDER BY o.price_minor ASC, o.projection_version DESC LIMIT 1
      ) o ON true
      WHERE p.title ILIKE '%' || $1 || '%' OR similarity(p.title, $1) > 0.3
      GROUP BY bucket ORDER BY count DESC`,

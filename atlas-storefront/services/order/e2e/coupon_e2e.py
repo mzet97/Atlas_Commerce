@@ -86,7 +86,7 @@ def main() -> None:
                  {"expected_version": 1, "correlation_id": f"c-{tag}"}, cara)
     assert s == 200, _
     s, offer = _call(CONTROL, "POST", "/ops/offers", {
-        "sku_id": sku, "seller_id": "m213-s", "market_id": "BR", "channel": "web",
+        "sku_id": sku, "seller_id": "atlas", "market_id": "BR", "channel": "web",
         "currency": "BRL", "price_minor": 10000,
         "idempotency_key": f"o-{tag}", "correlation_id": f"c-{tag}"}, cara)
     assert s == 201, offer

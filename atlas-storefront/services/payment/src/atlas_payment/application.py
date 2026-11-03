@@ -136,8 +136,22 @@ async def psp_by_key(idempotency_key: str) -> dict[str, object]:
     return dict(response.json())
 
 
+class FraudRejected(Exception):
+    """Velocity rule tripped (M10 antifraude): intent recorded as DECLINED."""
+
+
+FRAUD_WINDOW_SECONDS = 60
+FRAUD_MAX_AUTHORIZED = 5
+
+
 async def handle_create(repo: MongoPaymentRepository, cmd: CreateIntent) -> PaymentIntent:
-    """Initiate (idempotent) then drive one PSP attempt to a final outcome."""
+    """Initiate (idempotent) then drive one PSP attempt to a final outcome.
+
+    M10 antifraude (velocity): more than FRAUD_MAX_AUTHORIZED authorized
+    intents per customer inside the window -> DECLINED/FRAUD_VELOCITY
+    without touching the PSP. Committed intents stay authoritative: the
+    check counts owner truth, never an in-memory cache.
+    """
     intent = await repo.initiate(
         PaymentIntent.initiate(
             IntentId(f"pi-{uuid.uuid4().hex[:12]}"),
@@ -153,6 +167,12 @@ async def handle_create(repo: MongoPaymentRepository, cmd: CreateIntent) -> Paym
     if intent.status != domain.INITIATED:
         return intent  # idempotent replay: the winner already drove an outcome
     correlation = CorrelationId(cmd.correlation_id)
+    authorized_recent = await repo.count_authorized_since(
+        cmd.customer_id, time.time() - FRAUD_WINDOW_SECONDS
+    )
+    if authorized_recent >= FRAUD_MAX_AUTHORIZED:
+        intent.decline(None, "FRAUD_VELOCITY", correlation)
+        return await repo.save_with_events(intent)
     try:
         outcome = await psp_charge(
             cmd.order_id, cmd.amount_minor, cmd.currency,
