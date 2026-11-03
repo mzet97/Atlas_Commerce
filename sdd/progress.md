@@ -136,3 +136,13 @@
   novos); roadmap M10 ENTREGUE; M11 portfólio atualizado. Programa
   SDD M0→M10 fechado; limits nomeados: K8s deploy + L2/L3 (cluster),
   nav SLO @950/s (réplicas da loja).
+- FASE-11 (2026-11-03, sessão de desbloqueio): investigação final do
+  bloqueio de cluster com sudo local — causa-raiz PROVADA: `cpuset`
+  ausente da delegação da árvore systemd-user (user@1000.service delega
+  cpu/io/memory/pids/dmem; kubelet exige cpuset no cgroup v2; `ip_forward`
+  é namespaced e gravável em netns próprio — não é bloqueador). Host
+  root necessário para `/etc/systemd/system/user@1000.service.d` +
+  restart user@1000.service (EVD-008-002 corrigida com a receita exata).
+  M9 adicional: teto local BRACKETADO (saudável 950/20 → colapso 2000/40)
+  + soak 10min (554k reqs; checkout p95 92.9ms estável; velocity engajou
+  por design; oversell=0). results/{ceiling-2k,soak,ceiling.md}.
