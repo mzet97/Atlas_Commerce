@@ -54,7 +54,7 @@ async def _setup_offer() -> tuple[str, str]:
         await http.post(f"{CONTROL}/ops/products/{sku}/publish", json={
             "expected_version": 1, "correlation_id": f"c-{tag}"}, headers=auth)
         offer = (await http.post(f"{CONTROL}/ops/offers", json={
-            "sku_id": sku, "seller_id": "m6-seller", "market_id": "BR",
+            "sku_id": sku, "seller_id": "atlas", "market_id": "BR",
             "channel": "web", "currency": "BRL", "price_minor": 333,
             "idempotency_key": f"o-{tag}", "correlation_id": f"c-{tag}"},
             headers=auth)).json()
