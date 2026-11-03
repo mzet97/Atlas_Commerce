@@ -1,8 +1,8 @@
-"""fulfillment_ops module: audited shipment handoff (M6).
+"""fulfillment_ops module: audited shipment handoff + returns/RMA (M6).
 
 Requires fulfillment_operator. Control never touches stock or money: it
-reads the order view and triggers the owner-side CONFIRMED -> SHIPPED
-transition. Returns (no refund path) stay OPEN: no PSP refund exists.
+reads owner views and triggers owner-side transitions (ship, RMA approve
+— which itself performs the refund+restock at the owners).
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
-from .command_channel import allowed, forward, gate, json_out
+from .command_channel import allowed, authenticate, forward, gate, json_out
 
 router = APIRouter(prefix="/ops/fulfillment")
 FULFILLMENT_OPERATOR = "fulfillment_operator"
@@ -30,8 +30,8 @@ async def _owner_get(request: Request, path: str) -> tuple[int, dict[str, object
     ) as http:
         response = await http.get(path)
     parsed = response.json()
-    assert isinstance(parsed, dict)
-    return response.status_code, parsed
+    assert isinstance(parsed, (dict, list))
+    return response.status_code, parsed  # type: ignore[return-value]
 
 
 @router.get("/orders/{order_id}")
@@ -65,3 +65,34 @@ async def ship_order(order_id: str, body: ShipIn, request: Request) -> JSONRespo
     if status == 200:
         await allowed(request, token, "order:ship", order_id, body.correlation_id)
     return json_out(order, status)
+
+
+@router.get("/returns")
+async def list_returns(request: Request) -> JSONResponse:
+    """Operator queue: every return request awaiting a decision."""
+    token = await authenticate(request)
+    status, rmas = await _owner_get(request, "/returns")
+    _ = token
+    return JSONResponse(rmas, status_code=status)
+
+
+@router.post("/returns/{return_id}/approve")
+async def approve_return(
+    return_id: str, body: ShipIn, request: Request
+) -> JSONResponse:
+    """Operator approves an RMA. Owner refunds + restocks (audited here)."""
+    token = await gate(
+        request, "return:approve", return_id, body.correlation_id,
+        FULFILLMENT_OPERATOR, None,
+    )
+    status, rma = await forward(
+        request,
+        "order_url",
+        "POST",
+        f"/returns/{return_id}/approve",
+        {"correlation_id": body.correlation_id},
+        token,
+    )
+    if status == 200:
+        await allowed(request, token, "return:approve", return_id, body.correlation_id)
+    return json_out(rma, status)

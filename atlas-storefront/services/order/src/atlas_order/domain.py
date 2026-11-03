@@ -51,6 +51,7 @@ class OrderPayload(TypedDict, total=False):
     status: str
     payment_intent_id: str | None
     failure_reason: str | None
+    tracking_code: str
 
 
 Envelope = dict[str, str | int | OrderPayload | None]
@@ -292,17 +293,22 @@ class Order:
         return self._transition("OrderConfirmed", CONFIRMED, correlation_id)
 
     def ship(self, correlation_id: CorrelationId) -> DomainEvent:
-        """CONFIRMED -> SHIPPED: fulfillment handed to logistics (M6)."""
+        """CONFIRMED -> SHIPPED: fulfillment hands to logistics (M6) with a
+        deterministic fake-carrier label (carrier.py is the real seam)."""
         if self.status != CONFIRMED:
             raise InvalidTransition(status=self.status, event="OrderShipped")
         self.status = SHIPPED
         self.version += 1
+        from .carrier import issue_label
+
+        payload = self._payload()
+        payload["tracking_code"] = issue_label(self.id)
         event = new_event(
             "OrderShipped",
             self.id,
             self.version,
             correlation_id,
-            self._payload(),
+            payload,
             causation_id=self.events[0].event_id if self.events else None,
         )
         self.events.append(event)
@@ -312,6 +318,27 @@ class Order:
         """PENDING -> CANCELLED: payment declined, reservations released."""
         self.failure_reason = reason
         return self._transition("OrderCancelled", CANCELLED, correlation_id)
+
+    def cancel_confirmed(
+        self, reason: str, correlation_id: CorrelationId
+    ) -> DomainEvent:
+        """CONFIRMED -> CANCELLED (ops/RMA): the caller refunds BEFORE calling
+        this — a cancelled confirmed order without its refund is a money bug."""
+        if self.status != CONFIRMED:
+            raise InvalidTransition(status=self.status, event="cancel confirmed")
+        self.failure_reason = reason
+        self.status = CANCELLED
+        self.version += 1
+        event = new_event(
+            "OrderCancelled",
+            self.id,
+            self.version,
+            correlation_id,
+            self._payload(),
+            causation_id=self.events[0].event_id if self.events else None,
+        )
+        self.events.append(event)
+        return event
 
     def reject(self, reason: str, correlation_id: CorrelationId) -> DomainEvent:
         """PENDING -> REJECTED: no stock, nothing charged."""

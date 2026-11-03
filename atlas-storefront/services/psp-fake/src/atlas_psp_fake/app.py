@@ -132,6 +132,42 @@ async def charge_status(provider_ref: str) -> JSONResponse:
                          "status": record["status"]})
 
 
+class RefundIn(BaseModel):
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    provider_ref: str
+    amount_minor: int
+    idempotency_key: str
+
+
+_refunds_by_idem: dict[str, dict] = {}
+
+
+@app.post("/refunds", status_code=201)
+async def refund(body: RefundIn) -> JSONResponse:
+    """Refund a charge (partial allowed). Idempotent on key; bounded by the
+    charged amount minus what already went back."""
+    if body.idempotency_key in _refunds_by_idem:
+        original = _refunds_by_idem[body.idempotency_key]
+        return JSONResponse({**original, "duplicate": True})
+    charge = _charges.get(body.provider_ref)
+    if charge is None or charge["status"] != "approved":
+        return JSONResponse(
+            {"error": "charge not refundable"}, status_code=409)
+    already = int(charge.get("refunded_minor", 0))  # type: ignore[arg-type]
+    if body.amount_minor <= 0 \
+            or body.amount_minor > charge["amount_minor"] - already:
+        return JSONResponse({"error": "refund exceeds refundable amount"},
+                            status_code=422)
+    charge["refunded_minor"] = already + body.amount_minor
+    refund_id = f"psp-ref-{uuid.uuid4().hex[:12]}"
+    out = {"refund_id": refund_id, "provider_ref": body.provider_ref,
+           "amount_minor": body.amount_minor,
+           "refunded_minor": charge["refunded_minor"]}
+    _refunds_by_idem[body.idempotency_key] = out
+    return JSONResponse(out, status_code=201)
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}

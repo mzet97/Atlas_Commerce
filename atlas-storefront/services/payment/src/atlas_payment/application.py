@@ -13,6 +13,7 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import httpx
 
@@ -58,6 +59,29 @@ def _psp_base() -> str:
 
 def _psp_timeout() -> float:
     return float(os.getenv("PSP_TIMEOUT_SECONDS", "10"))
+
+
+async def psp_refund(
+    provider_ref: str, amount_minor: int, idempotency_key: str
+) -> dict[str, object]:
+    """Refund at the PSP. Non-2xx raises PSPError (nothing moves here)."""
+    try:
+        async with httpx.AsyncClient(timeout=_psp_timeout()) as http:
+            response = await http.post(
+                f"{_psp_base()}/refunds",
+                json={
+                    "provider_ref": provider_ref,
+                    "amount_minor": amount_minor,
+                    "idempotency_key": idempotency_key,
+                },
+            )
+    except httpx.HTTPError as exc:
+        raise PSPError(f"psp unreachable: {exc}") from exc
+    if response.status_code not in (200, 201):
+        raise PSPError(f"psp refund {response.status_code} {response.text[:80]}")
+    body = response.json()
+    assert isinstance(body, dict)
+    return body
 
 
 async def psp_charge(
@@ -239,3 +263,47 @@ async def handle_reconcile(
         causation_id=intent.events[0].event_id if intent.events else None,
     )
     return await repo.save_with_events(intent, [reconciled])
+
+
+@dataclass(frozen=True, slots=True)
+class RefundCommand:
+    intent_id: str
+    amount_minor: int | None
+    reason: str
+    idempotency_key: str
+    correlation_id: str
+
+
+async def handle_refund(
+    repo: MongoPaymentRepository, cmd: RefundCommand
+) -> PaymentIntent:
+    """PSP refund first, then the auditable local transition, atomically.
+
+    Full refund when no amount is given. A refund row with the same
+    idempotency key short-circuits to the stored outcome — replays never
+    re-validate against a fully refunded intent.
+    """
+    intent = await repo.get(IntentId(cmd.intent_id))
+    if await repo.find_refund(cmd.idempotency_key) is not None:
+        return intent
+    amount = cmd.amount_minor if cmd.amount_minor is not None \
+        else intent.refundable_minor()
+    refund_id = f"ref-{uuid.uuid4().hex[:12]}"
+    idem = IdempotencyKey(cmd.idempotency_key)
+    intent.refund(amount, CorrelationId(cmd.correlation_id))
+    psp_out = await psp_refund(
+        intent.provider_ref or "", amount, cmd.idempotency_key
+    )
+    refund_doc: dict[str, object] = {
+        "_id": refund_id,
+        "intent_id": intent.id,
+        "order_id": intent.order_id,
+        "amount_minor": amount,
+        "currency": intent.currency,
+        "reason": cmd.reason,
+        "psp_refund_id": psp_out.get("refund_id"),
+        "idempotency_key": idem,
+        "requested_at": datetime.now(UTC).isoformat(),
+    }
+    saved, _applied = await repo.refund_with_events(intent, refund_doc)
+    return saved

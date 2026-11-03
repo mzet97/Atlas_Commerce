@@ -23,6 +23,7 @@ TOPICS = (
     "atlas.payment.PaymentUnknown.v1",
     "atlas.payment.PaymentWebhookReceived.v1",
     "atlas.payment.PaymentReconciled.v1",
+    "atlas.payment.PaymentRefunded.v1",
 )
 
 
@@ -62,15 +63,18 @@ async def apply_event(pool: asyncpg.Pool, raw: bytes) -> bool:
             "PaymentDeclined",
             "PaymentUnknown",
             "PaymentReconciled",
+            "PaymentRefunded",
         ):
             await conn.execute(
                 "INSERT INTO payment_intents"
                 "(intent_id, order_id, customer_id, amount_minor, currency,"
-                " status, provider_ref, decline_code, projection_version)"
-                " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
+                " status, provider_ref, decline_code, refunded_minor,"
+                " projection_version)"
+                " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
                 " ON CONFLICT (intent_id) DO UPDATE SET"
                 " status=EXCLUDED.status, provider_ref=EXCLUDED.provider_ref,"
                 " decline_code=EXCLUDED.decline_code,"
+                " refunded_minor=EXCLUDED.refunded_minor,"
                 " projection_version=EXCLUDED.projection_version"
                 " WHERE payment_intents.projection_version"
                 " < EXCLUDED.projection_version",
@@ -82,6 +86,7 @@ async def apply_event(pool: asyncpg.Pool, raw: bytes) -> bool:
                 payload.get("status", ""),
                 payload.get("provider_ref"),
                 payload.get("decline_code"),
+                payload.get("refunded_minor", 0),
                 envelope.aggregate_version,
             )
         elif envelope.event_type == "PaymentWebhookReceived":

@@ -373,6 +373,51 @@ async def handle_checkout(
     return order, _status_for(order)
 
 
+async def rma_refund(
+    order: Order, rma_id: str, refund_total: int, correlation: str
+) -> None:
+    """RMA money leg: refund the order's intent (bounded by order total)."""
+    if order.payment_intent_id is None:
+        raise DownstreamError("order has no payment intent to refund")
+    try:
+        async with httpx.AsyncClient(base_url=_payment_base(), timeout=30) as http_pay:
+            response = await http_pay.post(
+                f"/intents/{order.payment_intent_id}/refunds",
+                json={
+                    "amount_minor": min(refund_total, order.total_minor),
+                    "reason": f"rma {rma_id}",
+                    "idempotency_key": f"rma-{rma_id}",
+                    "correlation_id": correlation,
+                },
+            )
+    except httpx.HTTPError as exc:
+        raise DownstreamError(f"payment unreachable: {exc}") from exc
+    if response.status_code != 201:
+        raise DownstreamError(f"rma refund: {response.status_code}")
+
+
+async def rma_restock(rma_lines: list[dict[str, object]], correlation: str) -> None:
+    """RMA stock leg: put returned units back (ledger reason = rma)."""
+    async with httpx.AsyncClient(base_url=_inventory_base(), timeout=15) as http_inv:
+        for line in rma_lines:
+            try:
+                adjust = await http_inv.post(
+                    "/positions/adjust",
+                    json={
+                        "warehouse_id": "W1",
+                        "sku_id": line["sku_id"],
+                        "delta": line["quantity"],
+                        "reason": f"rma ({correlation})",
+                        "actor": "returns-ops",
+                        "correlation_id": correlation,
+                    },
+                )
+            except httpx.HTTPError as exc:
+                raise DownstreamError(f"inventory unreachable: {exc}") from exc
+            if adjust.status_code != 200:
+                raise DownstreamError(f"rma restock: {adjust.status_code}")
+
+
 async def handle_ship(
     repo: MongoOrderRepository, order_id: str, correlation_id: str
 ) -> Order:
@@ -387,22 +432,41 @@ async def handle_ship(
 async def handle_ops_cancel(
     repo: MongoOrderRepository, order_id: str, correlation_id: str
 ) -> Order:
-    """Operational cancel (M4): PENDING only, reservations released.
+    """Operational cancel (M4/M6): PENDING releases; CONFIRMED refunds first.
 
-    CONFIRMED cancellation is a money event (refund) — refused here until
-    the refund flow lands (M6). Terminal orders return idempotently.
+    CONFIRMED cancel is a money event: the payment intent is refunded (full
+    remaining) BEFORE the order transitions — never the other way around.
+    SHIPPED stays refused (logistics reverse flow is the RMA path).
     """
     order = await repo.get(OrderId(order_id))
     if order.status in domain.TERMINAL:
         return order
-    if order.status == domain.CONFIRMED:
+    if order.status == domain.PENDING:
+        async with httpx.AsyncClient(base_url=_inventory_base(), timeout=15) as http_inv:
+            try:
+                await _release_all(http_inv, order, correlation_id)
+            except DownstreamError:
+                return order  # reservations stay; retry
+        order.cancel("cancelled by ops", _corr(correlation_id))
+        return await repo.save_with_events(order)
+    # CONFIRMED: refund leg is a hard precondition.
+    if order.payment_intent_id is None:
         raise domain.InvalidTransition(status=order.status, event="ops cancel")
-    async with httpx.AsyncClient(base_url=_inventory_base(), timeout=15) as http_inv:
-        try:
-            await _release_all(http_inv, order, correlation_id)
-        except DownstreamError:
-            return order  # reservations stay; retry
-    order.cancel("cancelled by ops", _corr(correlation_id))
+    try:
+        async with httpx.AsyncClient(base_url=_payment_base(), timeout=30) as http_pay:
+            response = await http_pay.post(
+                f"/intents/{order.payment_intent_id}/refunds",
+                json={
+                    "reason": f"ops cancel {order_id}",
+                    "idempotency_key": f"ops-cancel-{order.idempotency_key}",
+                    "correlation_id": correlation_id,
+                },
+            )
+    except httpx.HTTPError as exc:
+        raise DownstreamError(f"payment unreachable: {exc}") from exc
+    if response.status_code != 201:
+        raise DownstreamError(f"payment refund: {response.status_code}")
+    order.cancel_confirmed("cancelled by ops; refunded", _corr(correlation_id))
     return await repo.save_with_events(order)
 
 

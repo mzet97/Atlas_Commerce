@@ -152,6 +152,7 @@ class PaymentIntent:
     idempotency_key: IdempotencyKey
     provider_ref: str | None = None
     decline_code: str | None = None
+    refunded_minor: int = 0
     events: list[DomainEvent] = field(default_factory=list, repr=False)
 
     @classmethod
@@ -203,6 +204,7 @@ class PaymentIntent:
             "status": self.status,
             "provider_ref": self.provider_ref,
             "decline_code": self.decline_code,
+            "refunded_minor": self.refunded_minor,
         }
 
     def _transition(
@@ -248,3 +250,19 @@ class PaymentIntent:
             raise InvalidTransition(status=self.status, event="mark_unknown")
         self.provider_ref = provider_ref
         return self._transition("PaymentUnknown", UNKNOWN, correlation_id)
+
+    def refundable_minor(self) -> int:
+        """What may still go back: charged minus already refunded."""
+        return self.amount_minor - self.refunded_minor
+
+    def refund(
+        self, amount_minor: int, correlation_id: CorrelationId
+    ) -> DomainEvent:
+        """AUTHORIZED -> AUTHORIZED with refunded_minor grown (INV-006: refund
+        appends an auditable event, never an in-place edit)."""
+        if self.status != AUTHORIZED:
+            raise InvalidTransition(status=self.status, event="refund")
+        if amount_minor <= 0 or amount_minor > self.refundable_minor():
+            raise ValidationError(field="amount_minor", reason="exceeds refundable")
+        self.refunded_minor += amount_minor
+        return self._transition("PaymentRefunded", AUTHORIZED, correlation_id)

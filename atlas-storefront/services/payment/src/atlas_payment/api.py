@@ -68,6 +68,7 @@ def _body(intent: domain.PaymentIntent) -> dict[str, object]:
         "currency": intent.currency,
         "provider_ref": intent.provider_ref,
         "decline_code": intent.decline_code,
+        "refunded_minor": intent.refunded_minor,
     }
 
 
@@ -124,6 +125,37 @@ async def get_intent(intent_id: str, request: Request) -> JSONResponse:
     """Read a single intent (stale-read drill: projection may lag this view)."""
     intent = await _repo(request).get(IntentId(intent_id))
     return JSONResponse(_body(intent))
+
+
+class RefundRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    amount_minor: int | None = None
+    reason: str = "refund"
+    idempotency_key: str
+    correlation_id: str
+
+
+@app.post("/intents/{intent_id}/refunds", status_code=201)
+async def refund_intent(
+    intent_id: str, body: RefundRequest, request: Request
+) -> JSONResponse:
+    """Refund (full by default, partial by amount). PSP truth first.
+
+    Reached from Control four-eyes (payments:refund — never an AI tool)
+    and from RMA approvals. Replays converge on the stored refund.
+    """
+    intent = await application.handle_refund(
+        _repo(request),
+        application.RefundCommand(
+            intent_id=intent_id,
+            amount_minor=body.amount_minor,
+            reason=body.reason,
+            idempotency_key=body.idempotency_key,
+            correlation_id=body.correlation_id,
+        ),
+    )
+    return JSONResponse(_body(intent), status_code=201)
 
 
 @app.post("/webhooks/psp")

@@ -1,13 +1,16 @@
 """finance_ops module: audited finance reads + maker-checker money movement.
 
 Requires finance_analyst. Control never touches PSP credentials or owner
-Mongo: it reads the owner view and triggers owner-side reconciliation.
-Reads execute directly; RECONCILE needs four eyes (M4): one analyst
-requests, a DIFFERENT analyst approves, and only the approval executes.
+Mongo: it reads the owner view and triggers owner-side reconciliation or
+refunds. Reads execute directly; RECONCILE and REFUND below the value
+threshold execute with a single audited analyst, at or above it they take
+four eyes (M4): one analyst requests, a DIFFERENT analyst approves, and
+only the approval executes (payload travels with the request).
 """
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import asyncpg
@@ -23,11 +26,20 @@ from .command_channel import allowed, forward, gate, json_out, threshold_minor
 router = APIRouter(prefix="/ops/finance")
 FINANCE_ANALYST = "finance_analyst"
 RECONCILE_ACTION = "payment:reconcile"
+REFUND_ACTION = "payment:refund"
 
 
 class ReconcileIn(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    correlation_id: str
+
+
+class RefundIn(BaseModel):
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    amount_minor: int | None = None
+    reason: str = "refund"
     correlation_id: str
 
 
@@ -65,6 +77,18 @@ def _approval_body(row: asyncpg.Record) -> dict[str, object]:
         "decided_by": row["decided_by"],
         "execution_status": row["execution_status"],
     }
+
+
+def _approval_full(row: asyncpg.Record) -> dict[str, object]:
+    body = _approval_body(row)
+    payload = row["payload"]
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except ValueError:
+            payload = {}
+    body["payload"] = payload
+    return body
 
 
 @router.get("/payments/{intent_id}")
@@ -136,6 +160,73 @@ async def request_reconcile(
     return JSONResponse(_approval_body(row), status_code=202)
 
 
+@router.post("/payments/{intent_id}/refund")
+async def refund_payment(
+    intent_id: str, body: RefundIn, request: Request
+) -> JSONResponse:
+    """Refund (payments:refund — never an AI tool, ADR-0005).
+
+    Below the value threshold ONE analyst executes now; at or above it the
+    request is FILED with its payload and a DIFFERENT analyst approves.
+    """
+    token = await gate(
+        request, REFUND_ACTION, intent_id, body.correlation_id, FINANCE_ANALYST, None
+    )
+    status, intent = await _owner_get(request, f"/intents/{intent_id}")
+    amount = int(intent.get("amount_minor", 0)) if status == 200 else 0  # type: ignore[arg-type]
+    idem = f"refund-{intent_id}-{body.correlation_id[:24]}"
+    payload: dict[str, object] = {
+        "amount_minor": body.amount_minor,
+        "reason": body.reason,
+        "idempotency_key": idem,
+    }
+    if amount < threshold_minor():
+        status, refunded = await forward(
+            request,
+            "payment_url",
+            "POST",
+            f"/intents/{intent_id}/refunds",
+            {
+                "amount_minor": body.amount_minor,
+                "reason": body.reason,
+                "idempotency_key": idem,
+                "correlation_id": body.correlation_id,
+            },
+            token,
+        )
+        if status in (200, 201):
+            await allowed(request, token, REFUND_ACTION, intent_id, body.correlation_id)
+        return json_out(refunded, status)
+    approval_id = f"apr-{uuid.uuid4().hex[:12]}"
+    try:
+        row = await _pool(request).fetchrow(
+            "INSERT INTO finance_approvals"
+            "(id, action, intent_id, requested_by, request_correlation_id,"
+            " resource_type, payload)"
+            " VALUES ($1, $2, $3, $4, $5, 'payment_intent', $6) RETURNING *",
+            approval_id,
+            REFUND_ACTION,
+            intent_id,
+            token.subject,
+            body.correlation_id,
+            json.dumps(payload),
+        )
+    except asyncpg.UniqueViolationError:
+        await log_action(
+            _pool(request),
+            actor_sub=token.subject,
+            action=REFUND_ACTION,
+            resource_type="approval",
+            resource_id=intent_id,
+            result="denied",
+            correlation_id=body.correlation_id,
+        )
+        return JSONResponse({"detail": "refund already pending"}, status_code=409)
+    assert row is not None
+    await allowed(request, token, REFUND_ACTION, intent_id, body.correlation_id)
+    return JSONResponse(_approval_full(row), status_code=202)
+
+
 @router.get("/approvals/pending")
 async def list_pending(request: Request) -> JSONResponse:
     """Checker queue: every PENDING request awaiting a second pair of eyes."""
@@ -185,6 +276,29 @@ async def approve(
             {"correlation_id": body.correlation_id},
             token,
         )
+    elif row["action"] == REFUND_ACTION:
+        filed = row["payload"]
+        if isinstance(filed, str):
+            try:
+                filed = json.loads(filed)
+            except ValueError:
+                filed = {}
+        filed = filed if isinstance(filed, dict) else {}
+        status, target = await forward(
+            request,
+            "payment_url",
+            "POST",
+            f"/intents/{row['intent_id']}/refunds",
+            {
+                "amount_minor": filed.get("amount_minor"),
+                "reason": filed.get("reason", "refund"),
+                "idempotency_key": filed.get(
+                    "idempotency_key", f"refund-{approval_id}"
+                ),
+                "correlation_id": body.correlation_id,
+            },
+            token,
+        )
     else:
         status, target = await forward(
             request,
@@ -194,7 +308,7 @@ async def approve(
             {"correlation_id": body.correlation_id},
             token,
         )
-    if status == 200:
+    if status in (200, 201):
         result, exec_status = "EXECUTED", status
     else:
         result, exec_status = "FAILED", status

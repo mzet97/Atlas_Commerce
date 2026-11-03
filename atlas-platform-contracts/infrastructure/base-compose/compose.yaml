@@ -378,6 +378,35 @@ services:
       order-api: { condition: service_started }
     command: ["python", "-m", "atlas_order.relay"]
 
+  rabbit:
+    image: rabbitmq:4.1-management
+    environment:
+      RABBITMQ_DEFAULT_USER: atlas
+      RABBITMQ_DEFAULT_PASS: ${RABBIT_PASSWORD:?set in .env}
+    volumes: ["rabbit-data:/var/lib/rabbitmq"]
+    profiles: [m3]
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_running"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  notification-dispatcher:
+    # ADR-0003: Rabbit carries point-of-work tasks (notifications); Kafka
+    # carries domain events. Quorum queue, persistent messages.
+    build: ../../../atlas-storefront/services/order
+    environment:
+      PG_DSN: postgresql://postgres:${PG_PASSWORD:?set in .env}@pg:5432/atlas
+      RABBIT_URL: amqp://atlas:${RABBIT_PASSWORD:?set in .env}@rabbit:5672/
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-notification-dispatcher
+    profiles: [m3]
+    restart: unless-stopped
+    depends_on:
+      pg: { condition: service_healthy }
+      rabbit: { condition: service_healthy }
+    command: ["python", "-m", "atlas_order.notifier"]
+
   order-projector:
     build: ../../../atlas-storefront/services/order
     environment:
@@ -416,3 +445,4 @@ volumes:
   kc-data:
   redis-data:
   kafka-data:
+  rabbit-data:

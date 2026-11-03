@@ -28,6 +28,7 @@ class MongoPaymentRepository:
         await self._db.webhooks.create_index(
             [("provider_ref", 1), ("event", 1)], unique=True
         )
+        await self._db.refunds.create_index("idempotency_key", unique=True)
         await self._db.outbox.create_index("event_id", unique=True)
         await self._db.outbox.create_index("published")
 
@@ -45,6 +46,7 @@ class MongoPaymentRepository:
             "idempotency_key": i.idempotency_key,
             "provider_ref": i.provider_ref,
             "decline_code": i.decline_code,
+            "refunded_minor": i.refunded_minor,
         }
 
     @staticmethod
@@ -65,6 +67,7 @@ class MongoPaymentRepository:
             idempotency_key=IdempotencyKey(str(doc["idempotency_key"])),
             provider_ref=str(provider) if provider is not None else None,
             decline_code=str(decline) if decline is not None else None,
+            refunded_minor=int(doc.get("refunded_minor", 0)),  # type: ignore[arg-type]
         )
 
     async def initiate(self, intent: PaymentIntent) -> PaymentIntent:
@@ -164,6 +167,59 @@ class MongoPaymentRepository:
                 {"order_id": order_id}, sort=[("version", -1)]
             )
         return self._load(doc) if doc is not None else None
+
+    async def find_refund(self, idempotency_key: str) -> dict[str, object] | None:
+        doc = await self._db.refunds.find_one({"idempotency_key": idempotency_key})
+        return dict(doc) if doc is not None else None
+
+    async def refund_with_events(
+        self,
+        intent: PaymentIntent,
+        refund_doc: dict[str, object],
+    ) -> tuple[PaymentIntent, bool]:
+        """Refund audit row + intent transition + outbox, one transaction.
+
+        The refund row's unique idempotency key dedupes: a replay returns
+        the stored row and does NOT transition again.
+        """
+        events = list(intent.events)
+        base_version = intent.version - len(events)
+        for _ in range(3):
+            try:
+                async with (
+                    await self._db.client.start_session() as session,
+                    session.start_transaction(),
+                ):
+                    await self._db.refunds.insert_one(refund_doc, session=session)
+                    if events:
+                        updated = await self._db.intents.find_one_and_update(
+                            {"_id": intent.id, "version": base_version},
+                            {"$set": self._doc(intent)},
+                            session=session,
+                        )
+                        if updated is None:
+                            raise domain.WriteConflict(intent.idempotency_key)
+                    for event in events:
+                        await self._db.outbox.insert_one(
+                            {**event.envelope(), "published": False},
+                            session=session,
+                        )
+            except DuplicateKeyError:
+                stored = await self._db.refunds.find_one(
+                    {"idempotency_key": refund_doc["idempotency_key"]}
+                )
+                reloaded = await self.get(intent.id)
+                if stored is not None:
+                    return reloaded, False
+                raise
+            except OperationFailure as exc:
+                labels = exc.details.get("errorLabels", []) if exc.details else []
+                if "TransientTransactionError" not in labels:
+                    raise
+            else:
+                intent.events.clear()
+                return intent, True
+        raise domain.WriteConflict(intent.idempotency_key)
 
     async def apply_webhook(
         self,

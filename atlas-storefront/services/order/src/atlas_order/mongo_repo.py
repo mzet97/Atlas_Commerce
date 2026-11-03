@@ -5,7 +5,7 @@ from __future__ import annotations
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo.errors import DuplicateKeyError, OperationFailure
 
-from . import domain
+from . import domain, returns
 from .domain import (
     Cart,
     CartId,
@@ -33,9 +33,59 @@ class MongoOrderRepository:
         await self._db.carts.create_index("_id")
         await self._db.quotes.create_index("_id")
         await self._db.orders.create_index("idempotency_key", unique=True)
+        await self._db.returns.create_index("_id")
         await self._db.outbox.create_index("event_id", unique=True)
         await self._db.outbox.create_index("published")
         await self._db.coupons.create_index("_id")
+
+    # -- returns (RMA, M6) ------------------------------------------------
+    async def save_return(self, request: returns.ReturnRequest) -> None:
+        from datetime import UTC, datetime
+
+        await self._db.returns.update_one(
+            {"_id": request.id},
+            {"$set": {
+                "version": request.version,
+                "order_id": request.order_id,
+                "status": request.status,
+                "lines": [dict(line) for line in request.lines],
+                "reason": request.reason,
+                "decided_at": request.decided_at,
+                "updated_at": datetime.now(UTC).isoformat(),
+            }},
+            upsert=True,
+        )
+
+    async def get_return(self, return_id: str) -> returns.ReturnRequest | None:
+        doc = await self._db.returns.find_one({"_id": return_id})
+        if doc is None:
+            return None
+        return returns.ReturnRequest(
+            id=returns.ReturnId(str(doc["_id"])),
+            version=int(doc.get("version", 1)),
+            order_id=str(doc.get("order_id", "")),
+            status=str(doc.get("status", "REQUESTED")),
+            lines=[
+                {"sku_id": str(line["sku_id"]),
+                 "quantity": int(line["quantity"]),
+                 "price_minor": int(line["price_minor"])}
+                for line in doc.get("lines") or []
+            ],
+            reason=str(doc.get("reason", "")),
+            created_at=str(doc.get("created_at", "")),
+            decided_at=(
+                str(doc["decided_at"]) if doc.get("decided_at") else None
+            ),
+        )
+
+    async def list_returns(self, limit: int = 50) -> list[returns.ReturnRequest]:
+        docs = await self._db.returns.find().sort("updated_at", -1).to_list(limit)
+        out: list[returns.ReturnRequest] = []
+        for doc in docs:
+            got = await self.get_return(str(doc["_id"]))
+            if got is not None:
+                out.append(got)
+        return out
 
     # -- coupons (pricing rules; managed via Control /ops/coupons) --------
     async def upsert_coupon(self, doc: dict[str, object]) -> None:

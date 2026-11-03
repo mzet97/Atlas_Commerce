@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, ConfigDict
 
-from . import application, domain
+from . import application, domain, returns
 from .application import CheckoutCommand
 from .domain import Cart, CartId, OrderId, QuoteId
 from .mongo_repo import MongoOrderRepository
@@ -162,6 +162,16 @@ async def _conflict(_request: Request, exc: domain.WriteConflict) -> JSONRespons
 @app.exception_handler(application.DownstreamError)
 async def _downstream(_request: Request, exc: application.DownstreamError) -> JSONResponse:
     return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+@app.exception_handler(returns.AlreadyDecided)
+async def _already_decided(_request: Request, exc: returns.AlreadyDecided) -> JSONResponse:
+    return JSONResponse({"detail": str(exc)}, status_code=409)
+
+
+@app.exception_handler(returns.ReturnError)
+async def _return_error(_request: Request, exc: returns.ReturnError) -> JSONResponse:
+    return JSONResponse({"detail": str(exc)}, status_code=422)
 
 
 @app.post("/carts", status_code=201)
@@ -340,6 +350,99 @@ async def reconcile_order(
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# -- returns / RMA (M6) --------------------------------------------------
+
+
+class ReturnLineIn(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    sku_id: str
+    quantity: int
+    price_minor: int
+
+
+class CreateReturnRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    order_id: str
+    lines: list[ReturnLineIn]
+    reason: str = "customer return"
+
+
+class DecideReturnRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    correlation_id: str
+
+
+def _return_body(request: returns.ReturnRequest) -> dict[str, object]:
+    return {
+        "id": request.id,
+        "order_id": request.order_id,
+        "status": request.status,
+        "lines": [dict(line) for line in request.lines],
+        "reason": request.reason,
+        "refund_total_minor": request.refund_total_minor(),
+        "created_at": request.created_at,
+        "decided_at": request.decided_at,
+    }
+
+
+@app.post("/returns", status_code=201)
+async def create_return(body: CreateReturnRequest, request: Request) -> JSONResponse:
+    """Customer opens a return request; approval is the operator gate (M6)."""
+    rma = returns.create_return(
+        body.order_id,
+        [{"sku_id": line.sku_id, "quantity": line.quantity,
+          "price_minor": line.price_minor} for line in body.lines],
+        body.reason,
+    )
+    await _repo(request).save_return(rma)
+    return JSONResponse(_return_body(rma), status_code=201)
+
+
+@app.get("/returns/{return_id}")
+async def get_return(return_id: str, request: Request) -> JSONResponse:
+    rma = await _repo(request).get_return(return_id)
+    if rma is None:
+        raise domain.NotFound(f"return {return_id}")
+    return JSONResponse(_return_body(rma))
+
+
+@app.get("/returns")
+async def list_returns(request: Request) -> JSONResponse:
+    rmas = await _repo(request).list_returns()
+    return JSONResponse([_return_body(r) for r in rmas])
+
+
+@app.post("/returns/{return_id}/approve")
+async def approve_return(
+    return_id: str, body: DecideReturnRequest, request: Request
+) -> JSONResponse:
+    """Operator approves the RMA: refund the intent, restock, APPROVED.
+
+    Reached via Control /ops/returns/{id}/approve (audited). Idempotent:
+    an APPROVED rma replays untouched.
+    """
+    repo = _repo(request)
+    rma = await repo.get_return(return_id)
+    if rma is None:
+        raise domain.NotFound(f"return {return_id}")
+    order = await repo.get(OrderId(rma.order_id))
+    if order.status in (domain.PENDING, domain.CANCELLED, domain.REJECTED):
+        raise domain.ValidationError(
+            field="order", reason=f"return requires CONFIRMED/SHIPPED, got {order.status}"
+        )
+    rma = returns.apply_approval(rma, True, body.correlation_id)
+    await application.rma_refund(order, return_id, rma.refund_total_minor(),
+                                 body.correlation_id)
+    await application.rma_restock(
+        [{**line} for line in rma.lines], body.correlation_id
+    )
+    await repo.save_return(rma)
+    return JSONResponse(_return_body(rma))
 
 
 __all__ = ["QuoteId", "app"]
