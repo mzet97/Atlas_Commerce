@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import asyncpg
 import httpx
 
-from . import domain
+from . import domain, pricing
 from .domain import (
     Cart,
     CartId,
@@ -29,7 +29,6 @@ from .domain import (
 )
 from .mongo_repo import MongoOrderRepository
 
-WAREHOUSE_ID = "W1"
 MAX_DRIVE_STEPS = 8
 
 
@@ -62,10 +61,15 @@ def _corr(correlation_id: str) -> CorrelationId:
     return CorrelationId(correlation_id)
 
 
+def _warehouses() -> list[str]:
+    """Fulfillment sources, tried in order per line (env-configurable)."""
+    return [w.strip() for w in os.getenv("WAREHOUSES", "W1").split(",") if w.strip()]
+
+
 async def fetch_offer(pool: asyncpg.Pool, offer_id: str) -> dict[str, object] | None:
     """Price truth is the offer read model, never owner Mongo (INV-CQRS-001)."""
     row = await pool.fetchrow(
-        "SELECT offer_id, sku_id, currency, price_minor, status"
+        "SELECT offer_id, sku_id, currency, price_minor, market_id, status"
         " FROM available_offer_view WHERE offer_id = $1",
         offer_id,
     )
@@ -79,7 +83,11 @@ async def handle_quote(
     pool: asyncpg.Pool,
     cart_id: str,
 ) -> Quote:
-    """Price every cart line from the read model; quotes are immutable + TTL."""
+    """Price every cart line from the read model; quotes are immutable + TTL.
+
+    Breakdown: subtotal - coupon discount + market tax = total. One currency
+    and one market per cart (regional rules need a single jurisdiction).
+    """
     from datetime import UTC, datetime
 
     cart = await repo.get_cart(CartId(cart_id))
@@ -87,6 +95,7 @@ async def handle_quote(
         raise domain.ValidationError(field="cart", reason="empty")
     lines: list[domain.QuoteLine] = []
     currency: str | None = None
+    market: str | None = None
     for offer_id, quantity in cart.items.items():
         offer = await fetch_offer(pool, offer_id)
         if offer is None:
@@ -95,6 +104,11 @@ async def handle_quote(
             currency = str(offer["currency"])
         elif str(offer["currency"]) != currency:
             raise domain.ValidationError(field="currency", reason="mixed currencies")
+        offer_market = str(offer.get("market_id", ""))
+        if market is None:
+            market = offer_market
+        elif offer_market != market:
+            raise domain.ValidationError(field="market_id", reason="mixed markets")
         lines.append(
             {
                 "offer_id": offer_id,
@@ -103,27 +117,69 @@ async def handle_quote(
                 "price_minor": int(offer["price_minor"]),  # type: ignore[arg-type]
             }
         )
+    subtotal = sum(line["quantity"] * line["price_minor"] for line in lines)
+    coupon = (
+        await repo.get_coupon(cart.coupon_code) if cart.coupon_code else None
+    )
+    try:
+        discount = pricing.validate_coupon(coupon, cart.coupon_code, subtotal, market or "")
+    except pricing.CouponRejected as exc:
+        raise domain.ValidationError(field="coupon_code", reason=str(exc)) from exc
+    tax_rate, tax = pricing.tax_minor(market or "", subtotal - discount)
     expires = (datetime.now(UTC) + domain.QUOTE_TTL).isoformat()
     quote = Quote(
         id=QuoteId(f"q-{uuid.uuid4().hex[:12]}"),
         cart_id=cart.id,
         currency=currency or "",
         lines=lines,
-        total_minor=sum(line["quantity"] * line["price_minor"] for line in lines),
+        total_minor=subtotal - discount + tax,
         expires_at=expires,
+        subtotal_minor=subtotal,
+        discount_minor=discount,
+        tax_minor=tax,
+        tax_rate_bps=tax_rate,
+        market_id=market or "",
+        coupon_code=cart.coupon_code,
     )
     await repo.save_quote(quote)
     return quote
 
 
+async def _pick_warehouse(
+    http: httpx.AsyncClient, sku: str, qty: int
+) -> str | None:
+    """First configured warehouse whose stock hint covers the line.
+
+    This is an availability HINT (INV-CQRS-001): the reservation itself
+    revalidates atomically at the authoritative position.
+    """
+    for warehouse in _warehouses():
+        try:
+            response = await http.get(f"/positions/{warehouse}/{sku}")
+        except httpx.HTTPError as exc:
+            raise DownstreamError(f"inventory unreachable: {exc}") from exc
+        if response.status_code == 404:
+            continue  # no position in this warehouse
+        if response.status_code != 200:
+            raise DownstreamError(f"inventory position: {response.status_code}")
+        body = response.json()
+        assert isinstance(body, dict)
+        if int(body.get("available", 0)) >= qty:  # type: ignore[arg-type]
+            return warehouse
+    return None
+
+
 async def _reserve(
     http: httpx.AsyncClient, sku: str, qty: int, order: Order, correlation: str
 ) -> str:
+    warehouse = await _pick_warehouse(http, sku, qty)
+    if warehouse is None:
+        raise StockShortage(sku)
     try:
         response = await http.post(
             "/reservations",
             json={
-                "warehouse_id": WAREHOUSE_ID,
+                "warehouse_id": warehouse,
                 "sku_id": sku,
                 "quantity": qty,
                 "checkout_id": order.id,

@@ -40,8 +40,14 @@ class OrderPayload(TypedDict, total=False):
     order_id: str
     customer_id: str
     lines: list[QuoteLine]
+    subtotal_minor: int
+    discount_minor: int
+    tax_minor: int
     total_minor: int
     currency: str
+    market_id: str
+    coupon_code: str | None
+    tax_rate_bps: int
     status: str
     payment_intent_id: str | None
     failure_reason: str | None
@@ -145,6 +151,7 @@ class Cart:
     id: CartId
     customer_id: str
     items: dict[str, int] = field(default_factory=dict)  # offer_id -> quantity
+    coupon_code: str | None = None
 
     def add_item(self, offer_id: str, quantity: int) -> None:
         if quantity <= 0:
@@ -154,7 +161,11 @@ class Cart:
 
 @dataclass(slots=True)
 class Quote:
-    """Quote: immutable priced snapshot with TTL. Checkout consumes it once."""
+    """Quote: immutable priced snapshot with TTL. Checkout consumes it once.
+
+    Breakdown: subtotal - discount + tax = total. Tax is floor-rounded by
+    market rate (bps); coupon validated against the quote's single market.
+    """
 
     id: QuoteId
     cart_id: CartId
@@ -162,6 +173,12 @@ class Quote:
     lines: list[QuoteLine]
     total_minor: int
     expires_at: str
+    subtotal_minor: int = 0
+    discount_minor: int = 0
+    tax_minor: int = 0
+    tax_rate_bps: int = 0
+    market_id: str = ""
+    coupon_code: str | None = None
     consumed_by: str | None = None
 
     def expired(self, now: str) -> bool:
@@ -185,6 +202,12 @@ class Order:
     reservation_ids: list[str] = field(default_factory=list)
     payment_intent_id: str | None = None
     failure_reason: str | None = None
+    subtotal_minor: int = 0
+    discount_minor: int = 0
+    tax_minor: int = 0
+    tax_rate_bps: int = 0
+    market_id: str = ""
+    coupon_code: str | None = None
     events: list[DomainEvent] = field(default_factory=list, repr=False)
 
     @classmethod
@@ -213,6 +236,12 @@ class Order:
             currency=quote.currency,
             card_last4=card_last4,
             idempotency_key=idempotency_key,
+            subtotal_minor=quote.subtotal_minor,
+            discount_minor=quote.discount_minor,
+            tax_minor=quote.tax_minor,
+            tax_rate_bps=quote.tax_rate_bps,
+            market_id=quote.market_id,
+            coupon_code=quote.coupon_code,
         )
         order.events.append(
             new_event("OrderPlaced", order_id, 1, correlation_id, order._payload())
@@ -225,8 +254,14 @@ class Order:
             "quote_id": self.quote_id,
             "customer_id": self.customer_id,
             "lines": list(self.lines),
+            "subtotal_minor": self.subtotal_minor,
+            "discount_minor": self.discount_minor,
+            "tax_minor": self.tax_minor,
             "total_minor": self.total_minor,
             "currency": self.currency,
+            "market_id": self.market_id,
+            "coupon_code": self.coupon_code,
+            "tax_rate_bps": self.tax_rate_bps,
             "status": self.status,
             "payment_intent_id": self.payment_intent_id,
             "failure_reason": self.failure_reason,

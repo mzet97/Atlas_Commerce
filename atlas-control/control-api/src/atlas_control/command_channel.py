@@ -93,7 +93,7 @@ async def forward(
     path: str,
     body: dict[str, object],
     token: TokenInfo,
-) -> tuple[int, dict[str, object]]:
+) -> tuple[int, dict[str, object] | list[object]]:
     """Forward the owner command; owner status codes pass through untouched."""
     async with httpx.AsyncClient(
         base_url=getattr(request.app.state, base_url_attr), timeout=15
@@ -108,7 +108,7 @@ async def forward(
             },
         )
     parsed = response.json()
-    assert isinstance(parsed, dict)
+    assert isinstance(parsed, (dict, list))
     return response.status_code, parsed
 
 

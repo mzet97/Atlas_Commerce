@@ -26,13 +26,23 @@ services:
     command: ["bash", "-c", "for i in 1 2 3 4 5 6 7 8 9 10 11 12; do mongosh --host mongo --quiet --eval \"try{rs.status()}catch(e){rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]})}\" && exit 0; sleep 5; done; exit 1"]
 
   pg:
-    image: postgres:17
+    # Bootstrap baked in (see pg/Dockerfile): atlas/control DBs + control
+    # migrations run once on an empty data dir, on every host.
+    build:
+      context: .
+      dockerfile: pg/Dockerfile
+      additional_contexts:
+        control_migrations: ../../../atlas-control/control-api/migrations
+        catalog_migrations: ../../../atlas-storefront/services/catalog/migrations
+        offers_migrations: ../../../atlas-storefront/services/offers/migrations
+        inventory_migrations: ../../../atlas-storefront/services/inventory/migrations
+        payment_migrations: ../../../atlas-storefront/services/payment/migrations
+        order_migrations: ../../../atlas-storefront/services/order/migrations
+    image: atlas-base-pg
     environment:
       POSTGRES_PASSWORD: ${PG_PASSWORD:?set in .env}
     volumes:
       - pg-data:/var/lib/postgresql/data
-      - ./initdb:/docker-entrypoint-initdb.d:ro
-      - ../../../atlas-control/control-api/migrations:/control-migrations:ro
     ports: ["5432:5432"]
     profiles: [core, data]
     healthcheck:
@@ -341,6 +351,7 @@ services:
       PG_DSN: postgresql://postgres:${PG_PASSWORD:?set in .env}@pg:5432/atlas
       INVENTORY_API_URL: http://inventory-api:8000
       PAYMENT_API_URL: http://payment-api:8000
+      WAREHOUSES: W1,W2
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
       OTEL_SERVICE_NAME: atlas-order
     ports: ["8106:8000"]

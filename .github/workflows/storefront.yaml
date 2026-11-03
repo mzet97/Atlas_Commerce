@@ -60,6 +60,25 @@ jobs:
         working-directory: ${{ env.COMPOSE_DIR }}
         run: docker compose --profile core --profile data --profile m2 --profile m3 up -d --build
 
+      - name: Await infra readiness
+        working-directory: ${{ env.COMPOSE_DIR }}
+        run: |
+          set -e
+          ok=""
+          for i in $(seq 1 60); do
+            ok=$(docker compose exec -T mongo mongosh --quiet --eval 'try{rs.status().ok}catch(e){0}' 2>/dev/null | tail -1)
+            [ "$ok" = "1" ] && break
+            sleep 3
+          done
+          [ "$ok" = "1" ] || { echo "mongo replica set never ready"; exit 1; }
+          set -a; . ./.env; set +a
+          for i in $(seq 1 60); do
+            curl -sf -m 5 http://localhost:8180/realms/master/.well-known/openid-configuration >/dev/null && break
+            sleep 3
+          done
+          curl -sf -m 5 http://localhost:8180/realms/master/.well-known/openid-configuration >/dev/null \
+            || { echo "keycloak never ready"; exit 1; }
+
       - name: Seed realm + scope grants
         working-directory: ${{ env.COMPOSE_DIR }}
         run: |

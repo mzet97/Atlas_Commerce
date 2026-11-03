@@ -81,6 +81,30 @@ class ReconcileRequest(BaseModel):
     correlation_id: str
 
 
+class SetCouponRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    code: str | None
+    correlation_id: str
+
+
+class UpsertCouponRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    code: str
+    kind: str
+    value: int
+    market_id: str | None = None
+    min_subtotal_minor: int = 0
+    correlation_id: str
+
+
+class DeactivateCouponRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    correlation_id: str
+
+
 def _order_body(order: domain.Order) -> dict[str, object]:
     return {
         "id": order.id,
@@ -89,12 +113,24 @@ def _order_body(order: domain.Order) -> dict[str, object]:
         "quote_id": order.quote_id,
         "customer_id": order.customer_id,
         "lines": [dict(line) for line in order.lines],
+        "subtotal_minor": order.subtotal_minor,
+        "discount_minor": order.discount_minor,
+        "tax_minor": order.tax_minor,
         "total_minor": order.total_minor,
         "currency": order.currency,
+        "market_id": order.market_id,
+        "coupon_code": order.coupon_code,
+        "tax_rate_bps": order.tax_rate_bps,
         "reservation_ids": list(order.reservation_ids),
         "payment_intent_id": order.payment_intent_id,
         "failure_reason": order.failure_reason,
     }
+
+
+def _coupon_body(coupon: dict[str, object]) -> dict[str, object]:
+    body = dict(coupon)
+    body["active"] = bool(body.get("active", False))
+    return body
 
 
 @app.exception_handler(domain.NotFound)
@@ -140,7 +176,29 @@ async def add_item(cart_id: str, body: AddItemRequest, request: Request) -> JSON
     cart = await repo.get_cart(CartId(cart_id))
     cart.add_item(body.offer_id, body.quantity)
     await repo.save_cart(cart)
-    return JSONResponse({"id": cart.id, "items": cart.items})
+    return JSONResponse({"id": cart.id, "items": cart.items,
+                         "coupon_code": cart.coupon_code})
+
+
+@app.post("/carts/{cart_id}/coupon", status_code=200)
+async def set_coupon(
+    cart_id: str, body: SetCouponRequest, request: Request
+) -> JSONResponse:
+    """Attach/clear a coupon code; validity (market, minimum) applies at quote."""
+    repo = _repo(request)
+    cart = await repo.get_cart(CartId(cart_id))
+    if body.code is not None:
+        coupon = await repo.get_coupon(body.code)
+        if coupon is None or not bool(coupon.get("active", False)):
+            raise domain.ValidationError(
+                field="coupon_code", reason="unknown or inactive coupon"
+            )
+        cart.coupon_code = body.code
+    else:
+        cart.coupon_code = None
+    await repo.save_cart(cart)
+    return JSONResponse({"id": cart.id, "items": cart.items,
+                         "coupon_code": cart.coupon_code})
 
 
 @app.post("/carts/{cart_id}/quote", status_code=201)
@@ -153,11 +211,63 @@ async def quote_cart(cart_id: str, request: Request) -> JSONResponse:
             "cart_id": quote.cart_id,
             "currency": quote.currency,
             "lines": [dict(line) for line in quote.lines],
+            "subtotal_minor": quote.subtotal_minor,
+            "discount_minor": quote.discount_minor,
+            "tax_minor": quote.tax_minor,
+            "tax_rate_bps": quote.tax_rate_bps,
             "total_minor": quote.total_minor,
+            "market_id": quote.market_id,
+            "coupon_code": quote.coupon_code,
             "expires_at": quote.expires_at,
         },
         status_code=201,
     )
+
+
+# -- admin (coupon pricing rules; reached via Control /ops/coupons) ------
+
+
+@app.post("/admin/coupons", status_code=201)
+async def admin_upsert_coupon(body: UpsertCouponRequest, request: Request) -> JSONResponse:
+    """Create or update a coupon rule (kind PERCENT/FIXED)."""
+    if body.kind not in ("PERCENT", "FIXED"):
+        raise domain.ValidationError(field="kind", reason="must be PERCENT or FIXED")
+    if body.value <= 0:
+        raise domain.ValidationError(field="value", reason="must be positive")
+    repo = _repo(request)
+    await repo.upsert_coupon(
+        {
+            "code": body.code,
+            "kind": body.kind,
+            "value": body.value,
+            "market_id": body.market_id,
+            "min_subtotal_minor": body.min_subtotal_minor,
+            "active": True,
+        }
+    )
+    coupon = await repo.get_coupon(body.code)
+    assert coupon is not None
+    return JSONResponse(_coupon_body(coupon), status_code=201)
+
+
+@app.get("/admin/coupons")
+async def admin_list_coupons(request: Request) -> JSONResponse:
+    return JSONResponse([_coupon_body(c) for c in await _repo(request).list_coupons()])
+
+
+@app.post("/admin/coupons/{code}/deactivate", status_code=200)
+async def admin_deactivate_coupon(
+    code: str, body: DeactivateCouponRequest, request: Request
+) -> JSONResponse:
+    repo = _repo(request)
+    coupon = await repo.get_coupon(code)
+    if coupon is None:
+        raise domain.NotFound(f"coupon {code}")
+    coupon["active"] = False
+    await repo.upsert_coupon(coupon)
+    updated = await repo.get_coupon(code)
+    assert updated is not None
+    return JSONResponse(_coupon_body(updated))
 
 
 @app.post("/checkouts", status_code=201)

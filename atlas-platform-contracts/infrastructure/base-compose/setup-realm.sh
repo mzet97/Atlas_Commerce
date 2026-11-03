@@ -7,10 +7,17 @@ KC_URL="${KC_URL:-http://localhost:8180}"
 API="$KC_URL/admin/realms"
 
 token() {
-  curl -s -m 15 -X POST "$KC_URL/realms/master/protocol/openid-connect/token" \
-    -d "client_id=admin-cli" -d "username=$KC_ADMIN_USER" \
-    -d "password=$KC_ADMIN_PASSWORD" -d "grant_type=password" \
-  | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])"
+  # Keycloak may still be warming up; retry the bootstrap-admin grant.
+  for i in 1 2 3 4 5; do
+    T=$(curl -s -m 15 -X POST "$KC_URL/realms/master/protocol/openid-connect/token" \
+      -d "client_id=admin-cli" -d "username=$KC_ADMIN_USER" \
+      -d "password=$KC_ADMIN_PASSWORD" -d "grant_type=password" \
+      | python3 -c "import sys,json;print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
+    [ -n "$T" ] && { echo "$T"; return 0; }
+    sleep 5
+  done
+  echo "bootstrap admin grant never returned a token" >&2
+  return 1
 }
 T=$(token)
 
@@ -43,6 +50,7 @@ mkuser felix.finance "felix-dev-only" finance_analyst "felix@example.com" Felix 
 mkuser gina.fulfillment "gina-dev-only" fulfillment_operator "gina@example.com" Gina Fulfillment
 mkuser boss.admin "boss-dev-only" iam_admin "boss@example.com" Boss Admin
 mkuser cara.catalog "cara-dev-only" catalog_editor "cara@example.com" Cara Catalog
+mkuser pam.pricing "pam-dev-only" pricing_manager "pam@example.com" Pam Pricing
 # cara also operates stock in the demo (separate role, least privilege kept:
 # no pricing/finance roles, scopes below).
 ID=$(curl -s -m 15 "$API/atlas/users?username=cara.catalog" -H "Authorization: Bearer $T" \
@@ -64,12 +72,19 @@ psql_exec() {
   fi
 }
 if [ -n "${PG_PASSWORD:-}" ]; then
-  for scope in "market|BR" "warehouse|W1"; do
-    st=${scope%%|*}; sid=${scope##*|}
+  # user -> granted scopes (least privilege per role)
+  grant() { # user_id scope_type scope_id
     psql_exec -U postgres -d control \
-      -c "INSERT INTO scope_grants(actor_sub, scope_type, scope_id) VALUES ('$ID', '$st', '$sid') ON CONFLICT DO NOTHING;" \
+      -c "INSERT INTO scope_grants(actor_sub, scope_type, scope_id) VALUES ('$1', '$2', '$3') ON CONFLICT DO NOTHING;" \
       2>&1 | tail -n 1
+  }
+  for scope in "market BR" "warehouse W1"; do
+    st=${scope%% *}; sid=${scope##* }
+    grant "$ID" "$st" "$sid"
   done
+  PAM=$(curl -s -m 15 "$API/atlas/users?username=pam.pricing" -H "Authorization: Bearer $T" \
+    | python3 -c "import sys,json;print(json.load(sys.stdin)[0]['id'])")
+  grant "$PAM" "market" "BR"
 else
   echo "PG_PASSWORD unset: scope grants NOT seeded (run with compose .env sourced)"
 fi

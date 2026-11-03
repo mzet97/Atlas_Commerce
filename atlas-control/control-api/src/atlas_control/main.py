@@ -22,6 +22,7 @@ from .catalog_ops import router as catalog_router
 from .command_channel import Unauthorized
 from .finance_ops import router as finance_router
 from .fulfillment_ops import router as fulfillment_router
+from .order_ops import router as order_router
 from .pricing_ops import router as pricing_router
 from .stock_ops import router as stock_router
 
@@ -53,6 +54,7 @@ app = FastAPI(title="atlas-control", lifespan=lifespan)
 app.include_router(catalog_router)
 app.include_router(pricing_router)
 app.include_router(stock_router)
+app.include_router(order_router)
 app.include_router(finance_router)
 app.include_router(fulfillment_router)
 app.include_router(ai_router)

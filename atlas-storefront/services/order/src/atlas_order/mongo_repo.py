@@ -35,12 +35,37 @@ class MongoOrderRepository:
         await self._db.orders.create_index("idempotency_key", unique=True)
         await self._db.outbox.create_index("event_id", unique=True)
         await self._db.outbox.create_index("published")
+        await self._db.coupons.create_index("_id")
+
+    # -- coupons (pricing rules; managed via Control /ops/coupons) --------
+    async def upsert_coupon(self, doc: dict[str, object]) -> None:
+        await self._db.coupons.update_one(
+            {"_id": str(doc["code"])}, {"$set": doc}, upsert=True
+        )
+
+    async def get_coupon(self, code: str) -> dict[str, object] | None:
+        raw = await self._db.coupons.find_one({"_id": code})
+        if raw is None:
+            return None
+        coupon = dict(raw)
+        coupon.pop("_id", None)
+        coupon["code"] = str(raw["_id"])
+        return coupon
+
+    async def list_coupons(self) -> list[dict[str, object]]:
+        out: list[dict[str, object]] = []
+        async for raw in self._db.coupons.find():
+            coupon = dict(raw)
+            coupon["code"] = str(coupon.pop("_id", ""))
+            out.append(coupon)
+        return out
 
     # -- carts -----------------------------------------------------------
     async def save_cart(self, cart: Cart) -> None:
         await self._db.carts.update_one(
             {"_id": cart.id},
-            {"$set": {"customer_id": cart.customer_id, "items": cart.items}},
+            {"$set": {"customer_id": cart.customer_id, "items": cart.items,
+                      "coupon_code": cart.coupon_code}},
             upsert=True,
         )
 
@@ -49,8 +74,10 @@ class MongoOrderRepository:
         if doc is None:
             raise domain.NotFound(f"cart {cart_id}")
         items = doc.get("items") or {}
+        coupon = doc.get("coupon_code")
         return Cart(id=cart_id, customer_id=str(doc.get("customer_id", "")),
-                    items={str(k): int(v) for k, v in items.items()})
+                    items={str(k): int(v) for k, v in items.items()},
+                    coupon_code=str(coupon) if coupon else None)
 
     # -- quotes ----------------------------------------------------------
     async def save_quote(self, quote: Quote) -> None:
@@ -63,6 +90,12 @@ class MongoOrderRepository:
                 "total_minor": quote.total_minor,
                 "expires_at": quote.expires_at,
                 "consumed_by": quote.consumed_by,
+                "subtotal_minor": quote.subtotal_minor,
+                "discount_minor": quote.discount_minor,
+                "tax_minor": quote.tax_minor,
+                "tax_rate_bps": quote.tax_rate_bps,
+                "market_id": quote.market_id,
+                "coupon_code": quote.coupon_code,
             }
         )
 
@@ -70,6 +103,7 @@ class MongoOrderRepository:
         doc = await self._db.quotes.find_one({"_id": quote_id})
         if doc is None:
             raise domain.NotFound(f"quote {quote_id}")
+        consumed = doc.get("consumed_by")
         return Quote(
             id=quote_id,
             cart_id=CartId(str(doc["cart_id"])),
@@ -77,7 +111,15 @@ class MongoOrderRepository:
             lines=[_line(line) for line in doc.get("lines") or []],
             total_minor=int(doc["total_minor"]),  # type: ignore[arg-type]
             expires_at=str(doc["expires_at"]),
-            consumed_by=(str(doc["consumed_by"]) if doc.get("consumed_by") else None),
+            consumed_by=str(consumed) if consumed else None,
+            subtotal_minor=int(doc.get("subtotal_minor", 0)),
+            discount_minor=int(doc.get("discount_minor", 0)),
+            tax_minor=int(doc.get("tax_minor", 0)),
+            tax_rate_bps=int(doc.get("tax_rate_bps", 0)),
+            market_id=str(doc.get("market_id", "")),
+            coupon_code=(
+                str(doc["coupon_code"]) if doc.get("coupon_code") else None
+            ),
         )
 
     async def consume_quote(self, quote_id: QuoteId, order_id: OrderId) -> Quote:
@@ -114,6 +156,12 @@ class MongoOrderRepository:
             "reservation_ids": list(o.reservation_ids),
             "payment_intent_id": o.payment_intent_id,
             "failure_reason": o.failure_reason,
+            "subtotal_minor": o.subtotal_minor,
+            "discount_minor": o.discount_minor,
+            "tax_minor": o.tax_minor,
+            "tax_rate_bps": o.tax_rate_bps,
+            "market_id": o.market_id,
+            "coupon_code": o.coupon_code,
         }
 
     @staticmethod
@@ -122,6 +170,7 @@ class MongoOrderRepository:
         assert isinstance(doc["version"], int)
         payment = doc.get("payment_intent_id")
         failure = doc.get("failure_reason")
+        coupon = doc.get("coupon_code")
         return Order(
             id=OrderId(doc["_id"]),
             version=doc["version"],
@@ -136,6 +185,12 @@ class MongoOrderRepository:
             reservation_ids=[str(r) for r in doc.get("reservation_ids") or []],
             payment_intent_id=str(payment) if payment is not None else None,
             failure_reason=str(failure) if failure is not None else None,
+            subtotal_minor=int(doc.get("subtotal_minor", 0)),  # type: ignore[arg-type]
+            discount_minor=int(doc.get("discount_minor", 0)),  # type: ignore[arg-type]
+            tax_minor=int(doc.get("tax_minor", 0)),  # type: ignore[arg-type]
+            tax_rate_bps=int(doc.get("tax_rate_bps", 0)),  # type: ignore[arg-type]
+            market_id=str(doc.get("market_id", "")),
+            coupon_code=str(coupon) if coupon else None,
         )
 
     async def place_with_quote(self, order: Order, quote_id: QuoteId) -> Order:
