@@ -151,3 +151,21 @@ O stack containerd→runc→kubelet exige a cadeia completa de controllers
 cria sandbox — bloqueio NO NÍVEL DO KERNEL, intransponível sob o usuário
 mzet. As duas rotas válidas permanecem: root do host (uma vez, receita
 acima) ou kubeconfig externo.
+
+
+## Tentativa final (containerd rootless-runc option + pré-criação de /k8s.io)
+- `runc.options ["--rootless" = "true"]` no config.toml do containerd v2:
+  **não é uma opção do shim runc.v2** (options são campos de
+  `RuncOptions`: BinaryName/Root/SystemdCgroup) — ignorada.
+- Pré-criar `/k8s.io` como folha vazia (raiz limpa): o filho volta a
+  mostrar `cpu pids` e o sandbox continua falhando — o **enable-walk do
+  runc/containerd re-habilita `cpu pids` na raiz a cada tentativa** de
+  pod, recriando o estado inválido (no-internal-process) em loop.
+- Conclusão exaustiva (3 sessões, todas as rotas de usuário esgotadas —
+  podman/k3d/k3s-rootless/netns/control-plane-sem-agente/kubelet-
+  standalone/rootless-runc): o kubelet exige a cadeia completa
+  `cpu cpuset memory io pids` delegada pelo systemd do HOST; o kernel
+  `ogc4.1` delega apenas `cpu pids dmem` ao usuário. **Sem root do host
+  (uma linha, receita acima) ou kubeconfig externo, o deploy em cluster
+  é fisicamente impossível nesta máquina.** Manifests, harness e receitas
+  permanecem prontos para o primeiro momento em que a credencial exista.
