@@ -1,0 +1,73 @@
+# control + storefront (M2/M4/M5/M7). Control listens on 0.0.0.0:8000
+# in-cluster (the 127.0.0.1:8102 bind is compose-dev only).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-api
+  namespace: atlas
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: control-api }
+  template:
+    metadata:
+      labels: { app: control-api }
+    spec:
+      containers:
+        - name: api
+          image: atlas-control:dev
+          command: ["uvicorn", "atlas_control.main:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports: [{ containerPort: 8000 }]
+          env:
+            - name: CONTROL_PG_DSN
+              valueFrom: { secretKeyRef: { name: atlas-secrets, key: control-pg-dsn } }
+            - name: ATLAS_PG_DSN
+              valueFrom: { secretKeyRef: { name: atlas-secrets, key: pg-dsn } }
+            - { name: OTEL_SERVICE_NAME, value: atlas-control }
+          envFrom: [{ configMapRef: { name: atlas-config } }]
+          livenessProbe: { httpGet: { path: /health, port: 8000 }, initialDelaySeconds: 20, periodSeconds: 15 }
+          readinessProbe: { httpGet: { path: /health, port: 8000 }, initialDelaySeconds: 10, periodSeconds: 10 }
+          resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: 500m, memory: 512Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-api
+  namespace: atlas
+spec:
+  selector: { app: control-api }
+  ports: [{ port: 8000, targetPort: 8000 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storefront-next
+  namespace: atlas
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: storefront-next }
+  template:
+    metadata:
+      labels: { app: storefront-next }
+    spec:
+      containers:
+        - name: web
+          image: atlas-storefront:dev
+          command: ["pnpm", "start"]
+          ports: [{ containerPort: 3000 }]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: atlas-secrets, key: pg-dsn } }
+          livenessProbe: { httpGet: { path: /, port: 3000 }, initialDelaySeconds: 30, periodSeconds: 20 }
+          readinessProbe: { httpGet: { path: /, port: 3000 }, initialDelaySeconds: 15, periodSeconds: 10 }
+          resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: 1000m, memory: 1Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: storefront-next
+  namespace: atlas
+spec:
+  selector: { app: storefront-next }
+  ports: [{ port: 3000, targetPort: 3000 }]

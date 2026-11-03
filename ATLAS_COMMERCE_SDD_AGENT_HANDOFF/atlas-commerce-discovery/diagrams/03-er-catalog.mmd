@@ -1,0 +1,84 @@
+erDiagram
+    SELLER ||--o{ OFFER : owns
+    MARKET ||--o{ OFFER : qualifies
+    CATEGORY ||--o{ PRODUCT : categorizes
+    PRODUCT ||--|{ SKU : has
+    SKU ||--o{ OFFER : listed_as
+    PRODUCT ||--o{ PRODUCT_TRANSLATION : described_by
+    OFFER ||--o{ PRICE_RULE : uses
+    SKU ||--o{ STOCK_POSITION : distributed_across
+    WAREHOUSE ||--o{ STOCK_POSITION : holds
+    STOCK_POSITION ||--o{ STOCK_MOVEMENT : ledger
+    STOCK_POSITION ||--o{ RESERVATION : allocates
+    SELLER {
+      uuid seller_id PK
+      string legal_name
+      string status
+    }
+    MARKET {
+      string market_id PK
+      string country
+    }
+    CATEGORY {
+      uuid category_id PK
+      uuid parent_id FK
+      string taxonomy
+    }
+    PRODUCT {
+      uuid product_id PK
+      uuid category_id FK
+      string status
+      int version
+    }
+    PRODUCT_TRANSLATION {
+      uuid product_id FK
+      string locale PK
+      string title
+      string description
+    }
+    SKU {
+      uuid sku_id PK
+      uuid product_id FK
+      string sku_code
+      string attributes_json
+    }
+    OFFER {
+      uuid offer_id PK
+      uuid sku_id FK
+      uuid seller_id FK
+      string market_id FK
+      string currency
+      int price_minor
+      string status
+    }
+    PRICE_RULE {
+      uuid rule_id PK
+      uuid offer_id FK
+      string discount_kind
+      int version
+    }
+    WAREHOUSE {
+      uuid warehouse_id PK
+      string region
+    }
+    STOCK_POSITION {
+      uuid warehouse_id PK,FK
+      uuid sku_id PK,FK
+      int on_hand
+      int reserved
+      int safety_stock
+      int version
+    }
+    STOCK_MOVEMENT {
+      uuid movement_id PK
+      string position_key FK
+      int quantity_delta
+      string reason
+    }
+    RESERVATION {
+      uuid reservation_id PK
+      string position_key FK
+      int quantity
+      string status
+      datetime expires_at
+    }

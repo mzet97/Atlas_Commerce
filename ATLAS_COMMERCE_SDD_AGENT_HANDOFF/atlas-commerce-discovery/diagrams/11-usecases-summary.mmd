@@ -1,0 +1,15 @@
+flowchart LR
+    customer((Cliente)) --> c1[Buscar produtos]
+    customer --> c2[Comparar com IA]
+    customer --> c3[Gerenciar carrinho]
+    customer --> c4[Comprar e pagar]
+    customer --> c5[Acompanhar / devolver pedido]
+    operator((Operador)) --> a1[Cadastrar e publicar produto]
+    operator --> a2[Atualizar oferta e preco]
+    operator --> a3[Administrar estoque]
+    operator --> a4[Atender pedidos]
+    supervisor((Supervisor)) --> a5[Aprovar operacao sensivel]
+    auditor((Auditor)) --> a6[Auditar atividade]
+    c4 -.->|requires| c3
+    a3 -.->|may require| a5
+    a2 -.->|may require| a5

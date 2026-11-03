@@ -1,0 +1,84 @@
+# order slice (M3): owner API + relay + projector.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-api
+  namespace: atlas
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: order-api }
+  template:
+    metadata:
+      labels: { app: order-api }
+    spec:
+      containers:
+        - name: api
+          image: atlas-order:dev
+          command: ["uvicorn", "atlas_order.main:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports: [{ containerPort: 8000 }]
+          env:
+            - { name: MONGO_URL, value: "mongodb://mongo:27017/order?replicaSet=rs0" }
+            - name: PG_DSN
+              valueFrom: { secretKeyRef: { name: atlas-secrets, key: pg-dsn } }
+            - { name: OTEL_SERVICE_NAME, value: atlas-order }
+          envFrom: [{ configMapRef: { name: atlas-config } }]
+          livenessProbe: { httpGet: { path: /health, port: 8000 }, initialDelaySeconds: 20, periodSeconds: 15 }
+          readinessProbe: { httpGet: { path: /health, port: 8000 }, initialDelaySeconds: 10, periodSeconds: 10 }
+          resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: 500m, memory: 512Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-api
+  namespace: atlas
+spec:
+  selector: { app: order-api }
+  ports: [{ port: 8000, targetPort: 8000 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-relay
+  namespace: atlas
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: order-relay }
+  template:
+    metadata:
+      labels: { app: order-relay }
+    spec:
+      containers:
+        - name: relay
+          image: atlas-order:dev
+          command: ["python", "-m", "atlas_order.relay"]
+          env:
+            - { name: MONGO_URL, value: "mongodb://mongo:27017/order?replicaSet=rs0" }
+            - { name: OTEL_SERVICE_NAME, value: atlas-order-relay }
+          envFrom: [{ configMapRef: { name: atlas-config } }]
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 200m, memory: 256Mi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-projector
+  namespace: atlas
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: order-projector }
+  template:
+    metadata:
+      labels: { app: order-projector }
+    spec:
+      containers:
+        - name: projector
+          image: atlas-order:dev
+          command: ["python", "-m", "atlas_order.projector"]
+          env:
+            - name: PG_DSN
+              valueFrom: { secretKeyRef: { name: atlas-secrets, key: pg-dsn } }
+            - { name: OTEL_SERVICE_NAME, value: atlas-order-projector }
+          envFrom: [{ configMapRef: { name: atlas-config } }]
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 200m, memory: 256Mi } }

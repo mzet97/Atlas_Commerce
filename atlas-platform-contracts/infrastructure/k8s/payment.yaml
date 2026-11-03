@@ -1,0 +1,123 @@
+# payment slice (M3): owner API + relay + projector + PSP fake.
+# PSP fake is DEV/TEST ONLY: never expose outside the namespace, and never
+# point a production payment-api at it (M8-increment-2: NetworkPolicy).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-api
+  namespace: atlas
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: payment-api }
+  template:
+    metadata:
+      labels: { app: payment-api }
+    spec:
+      containers:
+        - name: api
+          image: atlas-payment:dev
+          command: ["uvicorn", "atlas_payment.main:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports: [{ containerPort: 8000 }]
+          env:
+            - { name: MONGO_URL, value: "mongodb://mongo:27017/payment?replicaSet=rs0" }
+            - name: PSP_WEBHOOK_SECRET
+              valueFrom: { secretKeyRef: { name: atlas-secrets, key: psp-webhook-secret } }
+            - name: PG_DSN
+              valueFrom: { secretKeyRef: { name: atlas-secrets, key: pg-dsn } }
+            - { name: OTEL_SERVICE_NAME, value: atlas-payment }
+          envFrom: [{ configMapRef: { name: atlas-config } }]
+          livenessProbe: { httpGet: { path: /health, port: 8000 }, initialDelaySeconds: 20, periodSeconds: 15 }
+          readinessProbe: { httpGet: { path: /health, port: 8000 }, initialDelaySeconds: 10, periodSeconds: 10 }
+          resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: 500m, memory: 512Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-api
+  namespace: atlas
+spec:
+  selector: { app: payment-api }
+  ports: [{ port: 8000, targetPort: 8000 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-relay
+  namespace: atlas
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: payment-relay }
+  template:
+    metadata:
+      labels: { app: payment-relay }
+    spec:
+      containers:
+        - name: relay
+          image: atlas-payment:dev
+          command: ["python", "-m", "atlas_payment.relay"]
+          env:
+            - { name: MONGO_URL, value: "mongodb://mongo:27017/payment?replicaSet=rs0" }
+            - { name: OTEL_SERVICE_NAME, value: atlas-payment-relay }
+          envFrom: [{ configMapRef: { name: atlas-config } }]
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 200m, memory: 256Mi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-projector
+  namespace: atlas
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: payment-projector }
+  template:
+    metadata:
+      labels: { app: payment-projector }
+    spec:
+      containers:
+        - name: projector
+          image: atlas-payment:dev
+          command: ["python", "-m", "atlas_payment.projector"]
+          env:
+            - name: PG_DSN
+              valueFrom: { secretKeyRef: { name: atlas-secrets, key: pg-dsn } }
+            - { name: OTEL_SERVICE_NAME, value: atlas-payment-projector }
+          envFrom: [{ configMapRef: { name: atlas-config } }]
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 200m, memory: 256Mi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: psp-fake
+  namespace: atlas
+  labels:
+    dev-only: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: psp-fake }
+  template:
+    metadata:
+      labels: { app: psp-fake }
+    spec:
+      containers:
+        - name: fake
+          image: atlas-psp-fake:dev
+          command: ["uvicorn", "atlas_psp_fake.app:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports: [{ containerPort: 8000 }]
+          env:
+            - { name: PSP_CALLBACK_URL, value: "http://payment-api:8000/webhooks/psp" }
+            - name: PSP_WEBHOOK_SECRET
+              valueFrom: { secretKeyRef: { name: atlas-secrets, key: psp-webhook-secret } }
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 200m, memory: 256Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: psp-fake
+  namespace: atlas
+spec:
+  selector: { app: psp-fake }
+  ports: [{ port: 8000, targetPort: 8000 }]

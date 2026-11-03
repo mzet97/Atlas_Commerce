@@ -1,0 +1,20 @@
+stateDiagram-v2
+    [*] --> PendingPayment : SubmitCheckout accepted
+    PendingPayment --> Confirmed : Payment authorized + reservations confirmed
+    PendingPayment --> PaymentFailed : PSP declined / terminal error
+    PendingPayment --> Cancelled : customer cancellation + compensation
+    PendingPayment --> ReconciliationRequired : PSP outcome unknown / failed compensation
+    ReconciliationRequired --> Confirmed : reconciled paid + inventory OK
+    ReconciliationRequired --> Cancelled : compensated/refunded
+    PaymentFailed --> Cancelled : reservations released
+    Confirmed --> Fulfilling : picking
+    Confirmed --> Cancelled : pre-fulfillment compensation
+    Fulfilling --> Shipped : carrier accepted
+    Shipped --> Delivered : delivery proof
+    Delivered --> ReturnRequested : within policy
+    ReturnRequested --> Returned : item accepted
+    ReturnRequested --> Delivered : request denied
+    Returned --> RefundPending : request payment refund
+    RefundPending --> Refunded : PSP confirms refund
+    Cancelled --> [*]
+    Refunded --> [*]

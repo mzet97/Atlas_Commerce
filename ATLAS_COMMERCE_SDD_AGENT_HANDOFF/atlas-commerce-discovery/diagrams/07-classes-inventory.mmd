@@ -1,0 +1,47 @@
+classDiagram
+    direction LR
+    class StockPosition {
+      +StockKey id
+      +int onHand
+      +int reserved
+      +int safetyStock
+      +int version
+      +available() int
+      +reserve(qty) Reservation
+      +release(qty)
+      +receive(qty, reason)
+      +adjust(delta, reason)
+    }
+    class Reservation {
+      +ReservationId id
+      +CheckoutId checkoutId
+      +int quantity
+      +ReservationStatus status
+      +datetime expiresAt
+      +confirm()
+      +expire()
+      +release()
+    }
+    class StockMovement {
+      +MovementId id
+      +int delta
+      +string reason
+      +SubjectId actor
+    }
+    class InventoryPolicy {
+      <<interface>>
+      +canReserve(position, qty) bool
+      +requiresApproval(movement) bool
+    }
+    class InventoryRepository {
+      <<interface>>
+      +reserveAtomically(key, qty, idemKey)
+      +saveMovementAndOutbox(...)
+    }
+    class ReserveStockHandler {
+      +handle(ReserveStockCommand) ReservationId
+    }
+    StockPosition "1" o-- "*" Reservation
+    StockPosition "1" o-- "*" StockMovement
+    ReserveStockHandler --> InventoryPolicy
+    ReserveStockHandler --> InventoryRepository

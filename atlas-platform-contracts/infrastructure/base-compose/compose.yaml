@@ -1,0 +1,401 @@
+# Atlas base compose — M1 core profile (dev/demo only, never prod HA).
+# Run from the host: distrobox-host-exec docker compose --profile core up -d
+# Host 4317 is taken (another OTLP receiver); OTLP mapped to 4319/4320 on host.
+# Inside the compose network the collector is still http://otel:4317.
+
+name: atlas-base
+
+services:
+  mongo:
+    image: mongo:8.0.6
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
+    volumes: ["mongo-data:/data/db"]
+    ports: ["27017:27017"]
+    profiles: [core, data]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongo-init:
+    image: mongo:8.0.6
+    profiles: [core, data]
+    depends_on: [mongo]
+    restart: "no"
+    command: ["bash", "-c", "for i in 1 2 3 4 5 6 7 8 9 10 11 12; do mongosh --host mongo --quiet --eval \"try{rs.status()}catch(e){rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]})}\" && exit 0; sleep 5; done; exit 1"]
+
+  pg:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?set in .env}
+    volumes: ["pg-data:/var/lib/postgresql/data"]
+    ports: ["5432:5432"]
+    profiles: [core, data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  keycloak-db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KC_DB_PASSWORD:?set in .env}
+      POSTGRES_DB: keycloak
+    volumes: ["kc-data:/var/lib/postgresql/data"]
+    profiles: [core, data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  keycloak:
+    image: keycloak/keycloak:26.2.5
+    command: ["start-dev"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL_HOST: keycloak-db
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD:?set in .env}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USER:?set in .env}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:?set in .env}
+      KC_HTTP_PORT: 8080
+    ports: ["8180:8080"]
+    profiles: [core]
+    depends_on:
+      keycloak-db: { condition: service_healthy }
+
+  redis:
+    image: redis:8.0.1
+    volumes: ["redis-data:/data"]
+    ports: ["6379:6379"]
+    profiles: [core, data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  otel:
+    image: grafana/otel-lgtm:0.8.1
+    ports: ["3300:3000", "4319:4317", "4320:4318"]
+    profiles: [core, observability]
+
+  kafka:
+    image: apache/kafka:4.0.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:29092,CONTROLLER://:29093,PLAINTEXT_HOST://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: YXRsYXMta2Fma2EtY2x1c3Q
+    ports: ["9092:9092"]
+    volumes: ["kafka-data:/var/lib/kafka/data"]
+    profiles: [core, data]
+    healthcheck:
+      test: ["CMD-SHELL", "cub kafka-ready -b localhost:9092 1 20 || kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  catalog-api:
+    build: ../../../atlas-storefront/services/catalog
+    environment:
+      MONGO_URL: mongodb://mongo:27017/catalog?replicaSet=rs0
+      KAFKA_BOOTSTRAP: kafka:29092
+      PG_DSN: postgresql://postgres:${PG_PASSWORD:?set in .env}@pg:5432/atlas
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-catalog
+    ports: ["8101:8000"]
+    profiles: [m2]
+    depends_on:
+      mongo-init: { condition: service_completed_successfully }
+      kafka: { condition: service_started }
+      pg: { condition: service_healthy }
+    command: ["uvicorn", "atlas_catalog.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  catalog-relay:
+    build: ../../../atlas-storefront/services/catalog
+    environment:
+      MONGO_URL: mongodb://mongo:27017/catalog?replicaSet=rs0
+      KAFKA_BOOTSTRAP: kafka:29092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-catalog-relay
+    profiles: [m2]
+    restart: unless-stopped
+    depends_on:
+      catalog-api: { condition: service_started }
+    command: ["python", "-m", "atlas_catalog.relay"]
+
+  catalog-projector:
+    build: ../../../atlas-storefront/services/catalog
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      PG_DSN: postgresql://postgres:${PG_PASSWORD:?set in .env}@pg:5432/atlas
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-catalog-projector
+    profiles: [m2]
+    restart: unless-stopped
+    depends_on:
+      catalog-api: { condition: service_started }
+    command: ["python", "-m", "atlas_catalog.projector"]
+
+  control-api:
+    build: ../../../atlas-control/control-api
+    # Host network (dev only): tokens carry iss http://localhost:8180/... and
+    # the API must reach Keycloak, Catalog and PG on the same localhost.
+    network_mode: host
+    environment:
+      KEYCLOAK_ISSUER: http://localhost:8180/realms/atlas
+      CATALOG_API_URL: http://localhost:8101
+      OFFERS_API_URL: http://localhost:8103
+      INVENTORY_API_URL: http://localhost:8104
+      PAYMENT_API_URL: http://localhost:8105
+      ORDER_API_URL: http://localhost:8106
+      ATLAS_PG_DSN: postgresql://postgres:${PG_PASSWORD:?set in .env}@localhost:5432/atlas
+      CONTROL_PG_DSN: postgresql://postgres:${PG_PASSWORD:?set in .env}@localhost:5432/control
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost:4319
+      OTEL_SERVICE_NAME: atlas-control
+    profiles: [m2]
+    depends_on:
+      pg: { condition: service_healthy }
+      keycloak: { condition: service_started }
+    # Host port 8000 belongs to another local API; serve on 8102.
+    command: ["uvicorn", "atlas_control.main:app", "--host", "127.0.0.1", "--port", "8102"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8102/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  storefront-next:
+    build: ../../../atlas-storefront/apps/storefront-next
+    environment:
+      DATABASE_URL: postgresql://postgres:${PG_PASSWORD:?set in .env}@pg:5432/atlas
+    ports: ["3100:3000"]
+    profiles: [m2]
+    depends_on:
+      pg: { condition: service_healthy }
+
+  offers-api:
+    build: ../../../atlas-storefront/services/offers
+    environment:
+      MONGO_URL: mongodb://mongo:27017/offers?replicaSet=rs0
+      KAFKA_BOOTSTRAP: kafka:29092
+      PG_DSN: postgresql://postgres:${PG_PASSWORD:?set in .env}@pg:5432/atlas
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-offers
+    ports: ["8103:8000"]
+    profiles: [m2]
+    depends_on:
+      mongo-init: { condition: service_completed_successfully }
+      kafka: { condition: service_started }
+      pg: { condition: service_healthy }
+    command: ["uvicorn", "atlas_offers.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  offers-relay:
+    build: ../../../atlas-storefront/services/offers
+    environment:
+      MONGO_URL: mongodb://mongo:27017/offers?replicaSet=rs0
+      KAFKA_BOOTSTRAP: kafka:29092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-offers-relay
+    profiles: [m2]
+    restart: unless-stopped
+    depends_on:
+      offers-api: { condition: service_started }
+    command: ["python", "-m", "atlas_offers.relay"]
+
+  offers-projector:
+    build: ../../../atlas-storefront/services/offers
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      PG_DSN: postgresql://postgres:${PG_PASSWORD:?set in .env}@pg:5432/atlas
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-offers-projector
+    profiles: [m2]
+    restart: unless-stopped
+    depends_on:
+      offers-api: { condition: service_started }
+    command: ["python", "-m", "atlas_offers.projector"]
+
+  inventory-api:
+    build: ../../../atlas-storefront/services/inventory
+    environment:
+      MONGO_URL: mongodb://mongo:27017/inventory?replicaSet=rs0
+      KAFKA_BOOTSTRAP: kafka:29092
+      PG_DSN: postgresql://postgres:${PG_PASSWORD:?set in .env}@pg:5432/atlas
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-inventory
+    ports: ["8104:8000"]
+    profiles: [m2]
+    depends_on:
+      mongo-init: { condition: service_completed_successfully }
+      kafka: { condition: service_started }
+      pg: { condition: service_healthy }
+    command: ["uvicorn", "atlas_inventory.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  inventory-relay:
+    build: ../../../atlas-storefront/services/inventory
+    environment:
+      MONGO_URL: mongodb://mongo:27017/inventory?replicaSet=rs0
+      KAFKA_BOOTSTRAP: kafka:29092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-inventory-relay
+    profiles: [m2]
+    restart: unless-stopped
+    depends_on:
+      inventory-api: { condition: service_started }
+    command: ["python", "-m", "atlas_inventory.relay"]
+
+  inventory-projector:
+    build: ../../../atlas-storefront/services/inventory
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      PG_DSN: postgresql://postgres:${PG_PASSWORD:?set in .env}@pg:5432/atlas
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-inventory-projector
+    profiles: [m2]
+    restart: unless-stopped
+    depends_on:
+      inventory-api: { condition: service_started }
+    command: ["python", "-m", "atlas_inventory.projector"]
+
+  payment-api:
+    build: ../../../atlas-storefront/services/payment
+    environment:
+      MONGO_URL: mongodb://mongo:27017/payment?replicaSet=rs0
+      KAFKA_BOOTSTRAP: kafka:29092
+      PG_DSN: postgresql://postgres:${PG_PASSWORD:?set in .env}@pg:5432/atlas
+      PSP_BASE_URL: http://psp-fake:8000
+      PSP_TIMEOUT_SECONDS: "10"
+      PSP_WEBHOOK_SECRET: ${PSP_WEBHOOK_SECRET:?set in .env}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-payment
+    ports: ["8105:8000"]
+    profiles: [m3]
+    depends_on:
+      mongo-init: { condition: service_completed_successfully }
+      kafka: { condition: service_started }
+      pg: { condition: service_healthy }
+      psp-fake: { condition: service_started }
+    command: ["uvicorn", "atlas_payment.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  payment-relay:
+    build: ../../../atlas-storefront/services/payment
+    environment:
+      MONGO_URL: mongodb://mongo:27017/payment?replicaSet=rs0
+      KAFKA_BOOTSTRAP: kafka:29092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-payment-relay
+    profiles: [m3]
+    restart: unless-stopped
+    depends_on:
+      payment-api: { condition: service_started }
+    command: ["python", "-m", "atlas_payment.relay"]
+
+  payment-projector:
+    build: ../../../atlas-storefront/services/payment
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      PG_DSN: postgresql://postgres:${PG_PASSWORD:?set in .env}@pg:5432/atlas
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-payment-projector
+    profiles: [m3]
+    restart: unless-stopped
+    depends_on:
+      payment-api: { condition: service_started }
+    command: ["python", "-m", "atlas_payment.projector"]
+
+  psp-fake:
+    build: ../../../atlas-storefront/services/psp-fake
+    environment:
+      PSP_CALLBACK_URL: http://payment-api:8000/webhooks/psp
+      PSP_WEBHOOK_SECRET: ${PSP_WEBHOOK_SECRET:?set in .env}
+    ports: ["8190:8000"]
+    profiles: [m3]
+    command: ["uvicorn", "atlas_psp_fake.app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  order-api:
+    build: ../../../atlas-storefront/services/order
+    environment:
+      MONGO_URL: mongodb://mongo:27017/order?replicaSet=rs0
+      KAFKA_BOOTSTRAP: kafka:29092
+      PG_DSN: postgresql://postgres:${PG_PASSWORD:?set in .env}@pg:5432/atlas
+      INVENTORY_API_URL: http://inventory-api:8000
+      PAYMENT_API_URL: http://payment-api:8000
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-order
+    ports: ["8106:8000"]
+    profiles: [m3]
+    depends_on:
+      mongo-init: { condition: service_completed_successfully }
+      kafka: { condition: service_started }
+      pg: { condition: service_healthy }
+      inventory-api: { condition: service_started }
+      payment-api: { condition: service_started }
+    command: ["uvicorn", "atlas_order.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  order-relay:
+    build: ../../../atlas-storefront/services/order
+    environment:
+      MONGO_URL: mongodb://mongo:27017/order?replicaSet=rs0
+      KAFKA_BOOTSTRAP: kafka:29092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-order-relay
+    profiles: [m3]
+    restart: unless-stopped
+    depends_on:
+      order-api: { condition: service_started }
+    command: ["python", "-m", "atlas_order.relay"]
+
+  order-projector:
+    build: ../../../atlas-storefront/services/order
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      PG_DSN: postgresql://postgres:${PG_PASSWORD:?set in .env}@pg:5432/atlas
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-order-projector
+    profiles: [m3]
+    restart: unless-stopped
+    depends_on:
+      order-api: { condition: service_started }
+    command: ["python", "-m", "atlas_order.projector"]
+
+  smoke-api:
+    build: ../smoke-api
+    environment:
+      MONGO_URL: mongodb://mongo:27017/health?replicaSet=rs0
+      REDIS_URL: redis://redis:6379/0
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-smoke-api
+    ports: ["8100:8000"]
+    profiles: [core]
+    depends_on:
+      mongo-init: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      otel: { condition: service_started }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongo-data:
+  pg-data:
+  kc-data:
+  redis-data:
+  kafka-data:

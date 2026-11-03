@@ -1,0 +1,102 @@
+erDiagram
+    CUSTOMER ||--o{ ADDRESS : owns
+    CUSTOMER ||--o{ CART : owns
+    CART ||--|{ CART_LINE : contains
+    CUSTOMER ||--o{ CUSTOMER_ORDER : places
+    CUSTOMER_ORDER ||--|{ ORDER_LINE : contains
+    CUSTOMER_ORDER ||--o{ ORDER_TRANSITION : follows
+    CUSTOMER_ORDER ||--o{ PAYMENT_INTENT : requests
+    PAYMENT_INTENT ||--o{ PAYMENT_ATTEMPT : has
+    PAYMENT_ATTEMPT ||--o{ CAPTURE : captures
+    CAPTURE ||--o{ REFUND : refunded_by
+    CUSTOMER_ORDER ||--o{ SHIPMENT : ships_in
+    SHIPMENT ||--o{ SHIPMENT_LINE : contains
+    ORDER_LINE ||--o{ SHIPMENT_LINE : shipped_as
+    CUSTOMER_ORDER ||--o{ RETURN_REQUEST : return_of
+    CUSTOMER {
+      uuid customer_id PK
+      string identity_sub
+      string locale
+    }
+    ADDRESS {
+      uuid address_id PK
+      uuid customer_id FK
+      string country
+      string postal_code
+    }
+    CART {
+      uuid cart_id PK
+      uuid customer_id FK
+      datetime updated_at
+    }
+    CART_LINE {
+      uuid cart_line_id PK
+      uuid cart_id FK
+      uuid sku_id
+      int quantity
+    }
+    CUSTOMER_ORDER {
+      uuid order_id PK
+      uuid customer_id FK
+      string state
+      string currency
+      int total_minor
+      datetime placed_at
+    }
+    ORDER_LINE {
+      uuid order_line_id PK
+      uuid order_id FK
+      uuid sku_id
+      string offer_snapshot_json
+      int quantity
+      int total_minor
+    }
+    ORDER_TRANSITION {
+      uuid transition_id PK
+      uuid order_id FK
+      string from_state
+      string to_state
+      datetime occurred_at
+    }
+    PAYMENT_INTENT {
+      uuid payment_intent_id PK
+      uuid order_id FK
+      int amount_minor
+      string currency
+      string status
+    }
+    PAYMENT_ATTEMPT {
+      uuid attempt_id PK
+      uuid payment_intent_id FK
+      string provider_ref
+      string status
+    }
+    CAPTURE {
+      uuid capture_id PK
+      uuid attempt_id FK
+      int amount_minor
+    }
+    REFUND {
+      uuid refund_id PK
+      uuid capture_id FK
+      int amount_minor
+      string status
+    }
+    SHIPMENT {
+      uuid shipment_id PK
+      uuid order_id FK
+      string carrier
+      string tracking_number
+    }
+    SHIPMENT_LINE {
+      uuid shipment_line_id PK
+      uuid shipment_id FK
+      uuid order_line_id FK
+      int quantity
+    }
+    RETURN_REQUEST {
+      uuid return_id PK
+      uuid order_id FK
+      string reason
+      string status
+    }

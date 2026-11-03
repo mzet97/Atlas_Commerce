@@ -1,0 +1,37 @@
+@startuml
+left to right direction
+skinparam packageStyle rectangle
+actor "Catalog Manager" as Catalog
+actor "Pricing Manager" as Pricing
+actor "Inventory Operator" as Inventory
+actor "Approver" as Approver
+actor "Finance Analyst" as Finance
+actor "Support Agent" as Support
+actor "Auditor" as Auditor
+actor "IAM Administrator" as IAM
+rectangle "Atlas Control (Angular + Modular Monolith)" {
+  usecase "Create/Edit product" as U1
+  usecase "Approve/Publish product" as U2
+  usecase "Manage offers & prices" as U3
+  usecase "Receive/Adjust stock" as U4
+  usecase "Approve sensitive action" as U5
+  usecase "Monitor sales/operations" as U6
+  usecase "Handle order/return" as U7
+  usecase "Reconcile payments/refunds" as U8
+  usecase "Audit action trail" as U9
+  usecase "Manage roles and scopes" as U10
+}
+Catalog --> U1
+Catalog --> U2
+Pricing --> U3
+Inventory --> U4
+Approver --> U5
+Finance --> U6
+Finance --> U8
+Support --> U7
+Auditor --> U9
+IAM --> U10
+U4 ..> U5 : <<extend>>
+U3 ..> U5 : <<extend>>
+U2 ..> U5 : <<include>>
+@enduml

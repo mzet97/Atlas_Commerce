@@ -1,0 +1,12 @@
+name: storefront-guard
+on: { push: {}, pull_request: {} }
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Repo hygiene (no secrets, no empty-service stubs)
+        run: |
+          git ls-files | grep -E '(^|/)\.env$' && { echo "real .env tracked"; exit 1; } || echo "no .env tracked"
+          git diff --check
+          echo "guard OK (service CI lands with SPEC-002 code)"

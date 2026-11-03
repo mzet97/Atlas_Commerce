@@ -1,0 +1,12 @@
+name: control-guard
+on: { push: {}, pull_request: {} }
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Repo hygiene (no secrets, modular-monolith boundary noted)
+        run: |
+          git ls-files | grep -E '(^|/)\.env$' && { echo "real .env tracked"; exit 1; } || echo "no .env tracked"
+          git diff --check
+          echo "guard OK (module CI lands with SPEC-004 code)"

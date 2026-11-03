@@ -1,0 +1,61 @@
+classDiagram
+    direction TB
+    class Order {
+      +OrderId id
+      +CustomerId customerId
+      +OrderStatus status
+      +Money total
+      +int version
+      +place(Quote, ReservationRefs)
+      +confirm(PaymentConfirmation)
+      +requestCancellation(Reason)
+      +recordTransition(OrderStatus)
+    }
+    class OrderLine {
+      +SkuId skuId
+      +OfferSnapshot offer
+      +int qty
+      +Money lineTotal
+    }
+    class Money {
+      <<value object>>
+      +int amountMinor
+      +Currency currency
+      +add(Money) Money
+    }
+    class OfferSnapshot {
+      <<value object>>
+      +OfferId offerId
+      +Money unitPrice
+      +string title
+      +TaxBreakdown taxes
+    }
+    class PlaceOrderHandler {
+      +handle(PlaceOrderCommand) OrderId
+    }
+    class OrderRepository {
+      <<interface>>
+      +get(OrderId) Order
+      +save(Order) void
+    }
+    class UnitOfWork {
+      <<interface>>
+      +commit() void
+    }
+    class OrderPolicy {
+      <<interface>>
+      +validatePlacement(Quote, ReservationRefs)
+    }
+    class DomainEvent {
+      <<interface>>
+      +EventId id
+      +int aggregateVersion
+    }
+    Order "1" *-- "1..*" OrderLine
+    OrderLine *-- OfferSnapshot
+    Order *-- Money
+    OfferSnapshot *-- Money
+    PlaceOrderHandler --> OrderRepository
+    PlaceOrderHandler --> UnitOfWork
+    PlaceOrderHandler --> OrderPolicy
+    Order ..> DomainEvent : emits

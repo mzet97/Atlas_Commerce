@@ -1,0 +1,38 @@
+@startuml
+left to right direction
+skinparam packageStyle rectangle
+actor Guest
+actor Customer
+actor "Payment Provider" as PSP
+actor "Shipping Provider" as Carrier
+Guest <|-- Customer
+rectangle "Atlas Storefront" {
+  usecase "Search product" as UC1
+  usecase "View offers & reviews" as UC2
+  usecase "Compare with AI assistant" as UC3
+  usecase "Manage cart" as UC4
+  usecase "Quote price/tax/shipping" as UC5
+  usecase "Place order" as UC6
+  usecase "Reserve stock" as UC7
+  usecase "Authorize payment" as UC8
+  usecase "Track shipment" as UC9
+  usecase "Request return/refund" as UC10
+  usecase "Approve AI cart proposal" as UC11
+  usecase "Manage addresses & consent" as UC12
+}
+Guest --> UC1
+Guest --> UC2
+Guest --> UC3
+Guest --> UC4
+Customer --> UC6
+Customer --> UC9
+Customer --> UC10
+Customer --> UC11
+Customer --> UC12
+UC6 ..> UC5 : <<include>>
+UC6 ..> UC7 : <<include>>
+UC6 ..> UC8 : <<include>>
+UC3 ..> UC11 : <<extend>>
+PSP --> UC8
+Carrier --> UC9
+@enduml

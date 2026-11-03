@@ -1,0 +1,15 @@
+flowchart LR
+  A[FastAPI Command Handler] --> B[Domain rules and UoW]
+  B --> C[(MongoDB Aggregate + Outbox)]
+  C --> D[MongoDB CDC / Debezium]
+  D --> K[[Apache Kafka Events]]
+  K --> E[Idempotent Projection Workers]
+  E --> G[(PostgreSQL Read Model + Inbox)]
+  G --> H[Query API]
+  H --> R[(Redis Cache)]
+  R --> F[Next.js / Angular]
+  B -->|Command Receipt + Version| F
+  K --> T[Analytics Stream Consumers]
+  K --> Q[Task Bridge]
+  Q --> M[[RabbitMQ Quorum Queues]]
+  M --> N[Notification / Fulfillment workers]

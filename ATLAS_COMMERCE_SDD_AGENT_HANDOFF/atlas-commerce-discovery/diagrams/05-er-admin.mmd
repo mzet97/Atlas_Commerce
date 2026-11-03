@@ -1,0 +1,53 @@
+erDiagram
+    IAM_SUBJECT ||--o{ SCOPE_GRANT : authorized_by
+    IAM_SUBJECT ||--o{ ADMIN_ACTION : performs
+    IAM_SUBJECT ||--o{ APPROVAL_REQUEST : requests
+    APPROVAL_REQUEST ||--o{ APPROVAL_DECISION : decided_by
+    APPROVAL_REQUEST ||--o{ ADMIN_ACTION : realizes
+    IAM_SUBJECT ||--o{ APPROVAL_DECISION : decides
+    ADMIN_CASE ||--o{ ADMIN_CASE_HISTORY : changes
+    IAM_SUBJECT {
+      string subject_sub PK
+      string display_name
+    }
+    SCOPE_GRANT {
+      uuid grant_id PK
+      string subject_sub FK
+      string role
+      string resource_scope
+    }
+    ADMIN_ACTION {
+      uuid action_id PK
+      string subject_sub FK
+      uuid approval_id FK
+      string command_name
+      string resource_ref
+      string correlation_id
+      string before_hash
+      string after_hash
+    }
+    APPROVAL_REQUEST {
+      uuid approval_id PK
+      string requested_by FK
+      string status
+      string justification
+      string command_payload_hash
+    }
+    APPROVAL_DECISION {
+      uuid decision_id PK
+      uuid approval_id FK
+      string approver_sub FK
+      string decision
+      datetime decided_at
+    }
+    ADMIN_CASE {
+      uuid case_id PK
+      string kind
+      string status
+    }
+    ADMIN_CASE_HISTORY {
+      uuid history_id PK
+      uuid case_id FK
+      string status
+      datetime occurred_at
+    }

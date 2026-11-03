@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: atlas
+  labels:
+    app.kubernetes.io/part-of: atlas-commerce
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: atlas-config
+  namespace: atlas
+data:
+  MONGO_URL: mongodb://mongo:27017
+  KAFKA_BOOTSTRAP: kafka:29092
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+  KEYCLOAK_ISSUER: http://keycloak:8180/realms/atlas
+  CATALOG_API_URL: http://catalog-api:8000
+  OFFERS_API_URL: http://offers-api:8000
+  INVENTORY_API_URL: http://inventory-api:8000
+  PAYMENT_API_URL: http://payment-api:8000
+  ORDER_API_URL: http://order-api:8000
+  PSP_BASE_URL: http://psp-fake:8000
+# Secrets (PG_PASSWORD, PSP_WEBHOOK_SECRET, KC_*) are intentionally absent:
+# mount them via SealedSecrets/ESO in M8-increment-2, never in git.

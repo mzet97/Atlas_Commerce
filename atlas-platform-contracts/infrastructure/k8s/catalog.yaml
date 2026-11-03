@@ -1,0 +1,85 @@
+# catalog slice: owner API + relay + projector (M2). Workers have no
+# ports/probes; the API serves /health on 8000.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-api
+  namespace: atlas
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: catalog-api }
+  template:
+    metadata:
+      labels: { app: catalog-api }
+    spec:
+      containers:
+        - name: api
+          image: atlas-catalog:dev
+          command: ["uvicorn", "atlas_catalog.main:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports: [{ containerPort: 8000 }]
+          env:
+            - { name: MONGO_URL, value: "mongodb://mongo:27017/catalog?replicaSet=rs0" }
+            - name: PG_DSN
+              valueFrom: { secretKeyRef: { name: atlas-secrets, key: pg-dsn } }
+            - { name: OTEL_SERVICE_NAME, value: atlas-catalog }
+          envFrom: [{ configMapRef: { name: atlas-config } }]
+          livenessProbe: { httpGet: { path: /health, port: 8000 }, initialDelaySeconds: 20, periodSeconds: 15 }
+          readinessProbe: { httpGet: { path: /health, port: 8000 }, initialDelaySeconds: 10, periodSeconds: 10 }
+          resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: 500m, memory: 512Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog-api
+  namespace: atlas
+spec:
+  selector: { app: catalog-api }
+  ports: [{ port: 8000, targetPort: 8000 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-relay
+  namespace: atlas
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: catalog-relay }
+  template:
+    metadata:
+      labels: { app: catalog-relay }
+    spec:
+      containers:
+        - name: relay
+          image: atlas-catalog:dev
+          command: ["python", "-m", "atlas_catalog.relay"]
+          env:
+            - { name: MONGO_URL, value: "mongodb://mongo:27017/catalog?replicaSet=rs0" }
+            - { name: OTEL_SERVICE_NAME, value: atlas-catalog-relay }
+          envFrom: [{ configMapRef: { name: atlas-config } }]
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 200m, memory: 256Mi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-projector
+  namespace: atlas
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: catalog-projector }
+  template:
+    metadata:
+      labels: { app: catalog-projector }
+    spec:
+      containers:
+        - name: projector
+          image: atlas-catalog:dev
+          command: ["python", "-m", "atlas_catalog.projector"]
+          env:
+            - name: PG_DSN
+              valueFrom: { secretKeyRef: { name: atlas-secrets, key: pg-dsn } }
+            - { name: OTEL_SERVICE_NAME, value: atlas-catalog-projector }
+          envFrom: [{ configMapRef: { name: atlas-config } }]
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 200m, memory: 256Mi } }

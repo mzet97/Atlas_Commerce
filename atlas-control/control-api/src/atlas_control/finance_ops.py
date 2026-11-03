@@ -1,0 +1,221 @@
+"""finance_ops module: audited finance reads + maker-checker money movement.
+
+Requires finance_analyst. Control never touches PSP credentials or owner
+Mongo: it reads the owner view and triggers owner-side reconciliation.
+Reads execute directly; RECONCILE needs four eyes (M4): one analyst
+requests, a DIFFERENT analyst approves, and only the approval executes.
+"""
+
+from __future__ import annotations
+
+import uuid
+
+import asyncpg
+import httpx
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
+
+from .audit import log_action
+from .auth import Forbidden
+from .command_channel import allowed, forward, gate, json_out
+
+router = APIRouter(prefix="/ops/finance")
+FINANCE_ANALYST = "finance_analyst"
+RECONCILE_ACTION = "payment:reconcile"
+
+
+class ReconcileIn(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    correlation_id: str
+
+
+class DecideIn(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    correlation_id: str
+
+
+async def _owner_get(request: Request, path: str) -> tuple[int, dict[str, object]]:
+    """Authenticated read of the owner view (no body on GET)."""
+    async with httpx.AsyncClient(
+        base_url=request.app.state.payment_url, timeout=15
+    ) as http:
+        response = await http.get(path)
+    parsed = response.json()
+    assert isinstance(parsed, dict)
+    return response.status_code, parsed
+
+
+def _pool(request: Request) -> asyncpg.Pool:
+    pool = request.app.state.pool
+    assert isinstance(pool, asyncpg.Pool)
+    return pool
+
+
+def _approval_body(row: asyncpg.Record) -> dict[str, object]:
+    return {
+        "approval_id": row["id"],
+        "action": row["action"],
+        "intent_id": row["intent_id"],
+        "status": row["status"],
+        "requested_by": row["requested_by"],
+        "decided_by": row["decided_by"],
+        "execution_status": row["execution_status"],
+    }
+
+
+@router.get("/payments/{intent_id}")
+async def view_payment(intent_id: str, request: Request) -> JSONResponse:
+    """Analyst views a payment intent. Others 403 + audit."""
+    token = await gate(
+        request, "payment:view", intent_id, f"view-{intent_id}", FINANCE_ANALYST, None
+    )
+    status, intent = await _owner_get(request, f"/intents/{intent_id}")
+    if status == 200:
+        await allowed(request, token, "payment:view", intent_id, f"view-{intent_id}")
+    return json_out(intent, status)
+
+
+@router.post("/payments/{intent_id}/reconcile", status_code=202)
+async def request_reconcile(
+    intent_id: str, body: ReconcileIn, request: Request
+) -> JSONResponse:
+    """Maker: file a reconcile request. Nothing moves until approved."""
+    token = await gate(
+        request, RECONCILE_ACTION, intent_id, body.correlation_id, FINANCE_ANALYST, None
+    )
+    approval_id = f"apr-{uuid.uuid4().hex[:12]}"
+    try:
+        row = await _pool(request).fetchrow(
+            "INSERT INTO finance_approvals"
+            "(id, action, intent_id, requested_by, request_correlation_id)"
+            " VALUES ($1, $2, $3, $4, $5) RETURNING *",
+            approval_id,
+            RECONCILE_ACTION,
+            intent_id,
+            token.subject,
+            body.correlation_id,
+        )
+    except asyncpg.UniqueViolationError:
+        await log_action(
+            _pool(request),
+            actor_sub=token.subject,
+            action=RECONCILE_ACTION,
+            resource_type="approval",
+            resource_id=intent_id,
+            result="denied",
+            correlation_id=body.correlation_id,
+        )
+        return JSONResponse({"detail": "reconcile already pending"}, status_code=409)
+    assert row is not None
+    await allowed(request, token, RECONCILE_ACTION, intent_id, body.correlation_id)
+    return JSONResponse(_approval_body(row), status_code=202)
+
+
+@router.get("/approvals/pending")
+async def list_pending(request: Request) -> JSONResponse:
+    """Checker queue: every PENDING request awaiting a second pair of eyes."""
+    await gate(request, "approval:list", None, "list", FINANCE_ANALYST, None)
+    rows = await _pool(request).fetch(
+        "SELECT * FROM finance_approvals WHERE status = 'PENDING'"
+        " ORDER BY requested_at",
+    )
+    return JSONResponse([_approval_body(row) for row in rows])
+
+
+@router.post("/approvals/{approval_id}/approve")
+async def approve(
+    approval_id: str, body: DecideIn, request: Request
+) -> JSONResponse:
+    """Checker: a DIFFERENT analyst approves and the command executes."""
+    token = await gate(
+        request, "approval:decide", approval_id, body.correlation_id,
+        FINANCE_ANALYST, None,
+    )
+    pool = _pool(request)
+    row = await pool.fetchrow(
+        "SELECT * FROM finance_approvals WHERE id = $1", approval_id
+    )
+    if row is None:
+        return JSONResponse({"detail": "approval not found"}, status_code=404)
+    if row["status"] != "PENDING":
+        return JSONResponse(
+            {"detail": f"already {row['status']}".lower()}, status_code=409)
+    if row["requested_by"] == token.subject:
+        await log_action(
+            pool,
+            actor_sub=token.subject,
+            action="approval:decide",
+            resource_type="approval",
+            resource_id=approval_id,
+            result="denied",
+            correlation_id=body.correlation_id,
+        )
+        raise Forbidden("maker cannot check its own request")
+    status, intent = await forward(
+        request,
+        "payment_url",
+        "POST",
+        f"/intents/{row['intent_id']}/reconcile",
+        {"correlation_id": body.correlation_id},
+        token,
+    )
+    if status == 200:
+        result, exec_status = "EXECUTED", status
+    else:
+        result, exec_status = "FAILED", status
+    updated = await pool.fetchrow(
+        "UPDATE finance_approvals SET status = $1, decided_by = $2,"
+        " decided_at = now(), execution_status = $3 WHERE id = $4 RETURNING *",
+        result,
+        token.subject,
+        exec_status,
+        approval_id,
+    )
+    assert updated is not None
+    await allowed(
+        request, token, "approval:decide", approval_id, body.correlation_id
+    )
+    return json_out({**_approval_body(updated), "intent": intent}, status)
+
+
+@router.post("/approvals/{approval_id}/reject")
+async def reject(approval_id: str, body: DecideIn, request: Request) -> JSONResponse:
+    """Checker declines the request. A fresh request may be filed later."""
+    token = await gate(
+        request, "approval:decide", approval_id, body.correlation_id,
+        FINANCE_ANALYST, None,
+    )
+    pool = _pool(request)
+    row = await pool.fetchrow(
+        "SELECT * FROM finance_approvals WHERE id = $1", approval_id
+    )
+    if row is None:
+        return JSONResponse({"detail": "approval not found"}, status_code=404)
+    if row["status"] != "PENDING":
+        return JSONResponse(
+            {"detail": f"already {row['status']}".lower()}, status_code=409)
+    if row["requested_by"] == token.subject:
+        await log_action(
+            pool,
+            actor_sub=token.subject,
+            action="approval:decide",
+            resource_type="approval",
+            resource_id=approval_id,
+            result="denied",
+            correlation_id=body.correlation_id,
+        )
+        raise Forbidden("maker cannot check its own request")
+    updated = await pool.fetchrow(
+        "UPDATE finance_approvals SET status = 'REJECTED', decided_by = $1,"
+        " decided_at = now() WHERE id = $2 RETURNING *",
+        token.subject,
+        approval_id,
+    )
+    assert updated is not None
+    await allowed(
+        request, token, "approval:decide", approval_id, body.correlation_id
+    )
+    return JSONResponse(_approval_body(updated))

@@ -1,0 +1,29 @@
+flowchart TB
+  shopper[Customer / Guest] --> store[Atlas Storefront - Next.js]
+  operator[Admin Operator] --> controlUI[Atlas Control - Angular]
+  store --> bff[Commerce BFF - FastAPI]
+  controlUI --> admin[Control API - Modular Monolith]
+  subgraph DOMAIN[Commerce business capabilities - own canonical commands]
+    cat[Catalog]
+    price[Offer & Pricing]
+    inv[Inventory]
+    cart[Cart]
+    check[Checkout / Saga]
+    ord[Orders]
+    pay[Payments]
+    ship[Fulfillment]
+    disc[Search / Discovery]
+    ai[Shopping Assistant]
+  end
+  bff --> disc & cart & check & ord & ai
+  check --> price & inv & ord & pay
+  admin -->|owner APIs only| cat & price & inv & ord & ship
+  cat & price & inv & ord & pay --> outbox[(MongoDB + Outbox)]
+  outbox --> kafka[[Kafka Domain Events]]
+  kafka --> proj[Query Projections]
+  proj --> pg[(PostgreSQL Read Models)]
+  bff --> pg
+  admin --> pg
+  bff --> iam[Keycloak / IAM]
+  admin --> iam
+  style DOMAIN fill:#f4f5f9,stroke:#666

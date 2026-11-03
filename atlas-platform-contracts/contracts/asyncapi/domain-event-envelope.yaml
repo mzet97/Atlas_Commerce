@@ -1,0 +1,50 @@
+# Domain event envelope v1 (PROPOSED — M1-increment-1)
+# Every Kafka domain event MUST carry these fields (INV-010).
+# Key: aggregate_id (ordering per key, never global). Consumers MUST
+# deduplicate on (consumer_id, event_id) and tolerate out-of-order delivery
+# via aggregate_version. At-least-once; end-to-end exactly-once is NOT promised.
+
+asyncapi: 3.0.0
+info:
+  title: Atlas Commerce domain events
+  version: 1.0.0
+channels:
+  domainEvents:
+    address: atlas.{domain}.{eventType}.v{schemaVersion}
+    messages:
+      domainEvent:
+        payload:
+          type: object
+          required:
+            - event_id
+            - event_type
+            - aggregate_id
+            - aggregate_version
+            - occurred_at
+            - schema_version
+            - correlation_id
+          properties:
+            event_id:          { type: string, format: uuid, description: unique per emission }
+            event_type:        { type: string, example: ProductPublished }
+            aggregate_id:      { type: string, description: Kafka key }
+            aggregate_version: { type: integer, minimum: 1 }
+            occurred_at:       { type: string, format: date-time }
+            schema_version:    { type: integer, minimum: 1 }
+            correlation_id:    { type: string }
+            causation_id:      { type: string }
+            tenant_id:         { type: string }
+            traceparent:       { type: string }
+            actor_sub:         { type: string, description: OIDC subject, when human-triggered }
+            payload:
+              type: object
+              description: event-specific data, PII-minimized, no PAN/CVV
+examples:
+  - ProductPublished:
+      event_id: 0193a6e2-1c4b-7d01-9e2a-000000000001
+      event_type: ProductPublished
+      aggregate_id: product-9f2c
+      aggregate_version: 3
+      occurred_at: 2026-10-27T13:00:00Z
+      schema_version: 1
+      correlation_id: corr-7f1a
+      payload: { product_id: product-9f2c, market_id: BR, status: PUBLISHED }

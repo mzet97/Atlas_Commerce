@@ -1,0 +1,41 @@
+[project]
+name = "atlas-catalog"
+version = "0.1.0"
+description = "Atlas Catalog owner service (M2 vertical slice)"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.30,<1",
+  "motor>=3.5,<4",
+  "aiokafka>=0.10,<1",
+  "asyncpg>=0.29,<1",
+  "pydantic>=2.0,<3",
+  "httpx>=0.27,<1",
+  "opentelemetry-sdk>=1.28,<2",
+  "opentelemetry-exporter-otlp>=1.28,<2",
+  "opentelemetry-instrumentation-fastapi>=0.49,<1",
+  "opentelemetry-instrumentation-pymongo>=0.49,<1",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<9", "pytest-asyncio>=0.24,<1", "ruff>=0.8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/atlas_catalog"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint.per-file-ignores]
+# Worker boundaries: a poison batch/record must be contained, never kill
+# the loop. Catch-all is the documented purpose here, not a missed case.
+"src/atlas_catalog/relay.py" = ["BLE001"]
+"src/atlas_catalog/projector.py" = ["BLE001"]

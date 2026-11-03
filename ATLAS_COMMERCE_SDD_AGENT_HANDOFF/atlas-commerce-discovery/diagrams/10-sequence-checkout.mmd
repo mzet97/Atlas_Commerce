@@ -1,0 +1,41 @@
+sequenceDiagram
+    autonumber
+    actor Customer
+    participant UI as Next.js Storefront
+    participant API as BFF / Checkout
+    participant INV as Inventory Mongo Owner
+    participant ORD as Orders Mongo Owner
+    participant PSP as Payments / Provider
+    participant EVT as Outbox / Kafka
+    Customer->>UI: Confirmar cotação e pagamento
+    UI->>API: SubmitCheckout(quote, idempotency_key)
+    API->>API: Autenticação, quote vigente, idempotência
+    API->>INV: ReserveStock(checkout_id, items)
+    alt Estoque indisponível
+        INV-->>API: ReservationRejected
+        API-->>UI: 409 Requote / stock unavailable
+    else Reserva concedida
+        INV-->>API: ReservationId
+        API->>ORD: PlaceOrder(snapshot, reservation_id)
+        ORD-->>API: OrderId PENDING_PAYMENT
+        API->>PSP: Authorize(payment_intent_id, idempotency_key)
+        alt PSP confirmado
+            PSP-->>API: Authorized (signed provider reference)
+            API->>INV: ConfirmReservation(order_id)
+            INV-->>API: ReservationConfirmed
+            API->>ORD: ConfirmOrder(order_id, payment_ref)
+            ORD-->>API: Confirmed
+            ORD-->>EVT: Mongo outbox -> CDC -> Kafka
+            API-->>UI: 200 Confirmed
+        else PSP recusado
+            PSP-->>API: Declined
+            API->>INV: ReleaseReservation(reservation_id)
+            API->>ORD: MarkPaymentFailed(order_id)
+            API-->>UI: 402 / terminal failure
+        else PSP indisponível ou resultado incerto
+            PSP--xAPI: Deadline exceeded / unknown
+            API->>API: Persistir PAYMENT_PENDING + reconciliation task
+            API-->>UI: 202 PENDING + order reference
+            Note over PSP,API: Webhook autenticado / reconciliador resolve depois
+        end
+    end
