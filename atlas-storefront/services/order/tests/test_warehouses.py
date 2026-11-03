@@ -10,6 +10,12 @@ import pytest
 from atlas_order import application
 
 
+@pytest.fixture(autouse=True)
+def two_warehouses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Given the env source list / picking covers both warehouses."""
+    monkeypatch.setenv("WAREHOUSES", "W1,W2")
+
+
 def _transport(positions: dict[str, int], reservations: list[str],
                shortage_warehouses: set[str] | None = None) -> httpx.MockTransport:
     """Inventory double: per-warehouse availability + reservation recorder."""

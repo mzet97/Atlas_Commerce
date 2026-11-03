@@ -84,7 +84,7 @@ class TestQuoteBreakdown:
     async def test_coupon_discount_applies_before_tax(
         self, api: AsyncClient, br_offer: None, repo: object
     ) -> None:
-        """Given P10 coupon / When quoted / Then 10000-1000+1380 = 10380."""
+        """Given P10 coupon / When quoted / Then 10000-1000+1395 = 10395."""
         from atlas_order.mongo_repo import MongoOrderRepository
 
         assert isinstance(repo, MongoOrderRepository)
@@ -97,8 +97,8 @@ class TestQuoteBreakdown:
         assert set_coupon.status_code == 200, set_coupon.text
         quote = await _quote(api, cart_id)
         assert quote["discount_minor"] == 1000
-        assert quote["tax_minor"] == 1380  # 10% off 9000 taxable, BR bps
-        assert quote["total_minor"] == 10380
+        assert quote["tax_minor"] == 1395  # 15.5% on 9000 taxable (BR bps)
+        assert quote["total_minor"] == 10395
         assert quote["coupon_code"] == "P10"
 
     async def test_unknown_coupon_code_rejected_on_set(

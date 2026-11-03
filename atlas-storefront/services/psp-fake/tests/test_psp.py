@@ -53,8 +53,8 @@ class TestDeterministicScenarios:
         assert second.json()["duplicate"] is True
 
     async def test_unknown_resolves_via_status(self, api: AsyncClient) -> None:
-        """Given amount 999 / When charged / Then 500 with ref; status approved."""
-        response = await api.post("/charges", json=_charge("k4", amount_minor=999))
+        """Given unknown card 9999 / When charged / Then 500 with ref; status approved."""
+        response = await api.post("/charges", json=_charge("k4", card_last4="9999"))
         assert response.status_code == 500
         ref = response.json()["provider_ref"]
         status = await api.get(f"/charges/{ref}")
@@ -71,7 +71,7 @@ class TestDeterministicScenarios:
 
     async def test_unknown_same_key_returns_pending(self, api: AsyncClient) -> None:
         """Given UNKNOWN charged / When same key retried / Then same pending ref."""
-        first = await api.post("/charges", json=_charge("k5", amount_minor=999))
-        second = await api.post("/charges", json=_charge("k5", amount_minor=999))
+        first = await api.post("/charges", json=_charge("k5", card_last4="9999"))
+        second = await api.post("/charges", json=_charge("k5", card_last4="9999"))
         assert second.status_code == 500
         assert second.json()["provider_ref"] == first.json()["provider_ref"]

@@ -10,7 +10,7 @@ test("login via redirect lands home with the username", async ({ page }) => {
   await page.waitForURL(/realms\/atlas\/protocol\/openid-connect\/auth/);
   await page.fill("#username", "alice.customer");
   await page.fill("#password", "alice-dev-only");
-  await page.click("input[name='login']");
+  await page.click("#kc-login");
   await page.waitForURL("http://localhost:3100/");
   await expect(page.locator(".site-header .user")).toHaveText("alice.customer");
   await expect(page.getByRole("link", { name: "sair" })).toBeVisible();
@@ -28,7 +28,7 @@ test("logout clears the session", async ({ page }) => {
   await page.waitForURL(/realms\/atlas\/protocol\/openid-connect\/auth/);
   await page.fill("#username", "alice.customer");
   await page.fill("#password", "alice-dev-only");
-  await page.click("input[name='login']");
+  await page.click("#kc-login");
   await page.waitForURL("http://localhost:3100/");
   await page.getByRole("link", { name: "sair" }).click();
   await page.waitForURL("http://localhost:3100/");

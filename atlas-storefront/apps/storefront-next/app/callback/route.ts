@@ -1,6 +1,7 @@
 import {
   clearCookie,
   exchangeCode,
+  originOf,
   sessionCookie,
   VERIFIER_COOKIE,
   STATE_COOKIE,
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 /** Auth Code + PKCE finish line: state must match the flow's cookie. */
 export async function GET(request: Request): Promise<Response> {
-  const origin = new URL(request.url).origin;
+  const origin = originOf(request);
   const params = new URL(request.url).searchParams;
   const code = params.get("code");
   const state = params.get("state");

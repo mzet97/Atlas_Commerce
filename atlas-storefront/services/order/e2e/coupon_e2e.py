@@ -116,8 +116,8 @@ def main() -> None:
     check("S03-breakdown",
           quote.get("subtotal_minor") == 10000
           and quote.get("discount_minor") == 1000
-          and quote.get("tax_minor") == 1380
-          and quote.get("total_minor") == 10380
+          and quote.get("tax_minor") == 1395
+          and quote.get("total_minor") == 10395
           and quote.get("market_id") == "BR",
           str({k: quote.get(k) for k in
                ("subtotal_minor", "discount_minor", "tax_minor", "total_minor")}))
@@ -129,11 +129,13 @@ def main() -> None:
     check("S04-confirmed", s == 201 and order.get("status") == "CONFIRMED",
           f"{s} {order.get('status')}")
     check("S04-order-breakdown",
-          order.get("discount_minor") == 1000 and order.get("tax_minor") == 1380
-          and order.get("coupon_code") == code, "")
+          order.get("discount_minor") == 1000 and order.get("tax_minor") == 1395
+          and order.get("coupon_code") == code,
+          str({k: order.get(k) for k in
+               ("discount_minor", "tax_minor", "coupon_code", "total_minor")}))
     s, intent = _call(PAYMENT, "GET", f"/intents/{order['payment_intent_id']}")
     check("S04-intent-amount",
-          s == 200 and intent.get("amount_minor") == 10380
+          s == 200 and intent.get("amount_minor") == 10395
           and intent.get("status") == "AUTHORIZED",
           str(intent.get("amount_minor")))
     s, w2 = _call(INVENTORY, "GET", f"/positions/W2/{sku}")

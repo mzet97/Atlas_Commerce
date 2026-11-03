@@ -109,6 +109,11 @@ def quote_for(offer_id: str) -> dict:
         time.sleep(2)
 
 
+def _br_total(subtotal: int) -> int:
+    """Checkout totals carry the market tax (BR = 1550 bps, floor)."""
+    return subtotal + subtotal * 1550 // 10000
+
+
 def checkout(quote_id: str, card: str, key: str, qty_note: str = "") -> tuple[int, dict]:
     return _call(ORDER, "POST", "/checkouts", {
         "quote_id": quote_id, "customer_id": "e2e-cust", "card_last4": card,
@@ -140,7 +145,8 @@ def main() -> None:
 
     # C01 happy path: 333 approved -> CONFIRMED, stock committed.
     q1 = quote_for(offer_id)
-    check("C01-quote", q1["total_minor"] == 333, f"total={q1['total_minor']}")
+    check("C01-quote", q1["total_minor"] == _br_total(333),
+          f"total={q1['total_minor']}")
     s, o1 = checkout(q1["id"], "4242", f"e2e-c01-{time.time_ns()}")
     check("C01-confirmed", s == 201 and o1["status"] == "CONFIRMED", f"{s}")
     check("C01-stock-committed",
@@ -171,8 +177,11 @@ def main() -> None:
         if time.time() > deadline:
             raise SystemExit("FAIL C03-quote-never-visible")
         time.sleep(2)
-    check("C03-quote-666", q3["total_minor"] == 666, "")
-    s, o3 = checkout(q3["id"], "4242", f"e2e-c03-{time.time_ns()}")
+    check("C03-quote-666", q3["total_minor"] == _br_total(666),
+          f"total={q3['total_minor']}")
+    # Card 6666 simulates a slow acquirer: checkout stays PENDING, the PSP
+    # truth (reconciliation) resolves it — never a retry of the charge.
+    s, o3 = checkout(q3["id"], "6666", f"e2e-c03-{time.time_ns()}")
     check("C03-pending", s == 202 and o3["status"] == "PENDING", f"{s}")
     settled = wait_status(o3["id"], "CONFIRMED", 20)
     if settled["status"] != "CONFIRMED":

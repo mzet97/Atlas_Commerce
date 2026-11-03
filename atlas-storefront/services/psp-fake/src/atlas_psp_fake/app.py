@@ -18,9 +18,13 @@ app = FastAPI(title="atlas-psp-fake")
 
 SECRET = os.getenv("PSP_WEBHOOK_SECRET", "psp-dev-secret")
 CALLBACK_URL = os.getenv("PSP_CALLBACK_URL", "")
-TIMEOUT_AMOUNT: int = 666
-UNKNOWN_AMOUNT: int = 999
 DECLINED_SUFFIX = "0002"
+# Simulator knobs live on the CARD, never the amount: checkout totals now
+# carry regional tax, so amount-matching would drift (found by the
+# coupon/tax drill). 6666 = slow authorization; 9999 = never responds
+# (only reconciliation truth resolves it).
+TIMEOUT_SUFFIX = "6666"
+UNKNOWN_SUFFIX = "9999"
 
 _charges: dict[str, dict] = {}
 _by_idem: dict[str, dict] = {}
@@ -92,14 +96,14 @@ async def charge(body: ChargeIn, x_chaos: str = Header(default="")) -> JSONRespo
         _by_idem[body.idempotency_key] = (response, 200)
         await _deliver_webhook("declined", record, x_chaos)
         return JSONResponse(response)
-    if body.amount_minor == UNKNOWN_AMOUNT:
+    if body.card_last4.endswith(UNKNOWN_SUFFIX):
         record["status"] = "approved"
         _charges[ref] = record
         pending = {"provider_ref": ref, "pending": True,
                    "error": "acquirer timeout"}
         _by_idem[body.idempotency_key] = (pending, 500)
         return JSONResponse(pending, status_code=500)
-    if body.amount_minor == TIMEOUT_AMOUNT:
+    if body.card_last4.endswith(TIMEOUT_SUFFIX):
         await asyncio.sleep(12)
     _charges[ref] = record
     response = _approved(ref, body)
