@@ -78,3 +78,24 @@
   control 21, tsc limpo); stack 26 Up com /health 200 nas 8 APIs.
   Programa M0→M11 executado; OPENs documentados (M10, K8s deploy, L1-L4,
   refunds, RabbitMQ, i18n/SEO, ML, remotes/commits p/ revisão).
+- FASE-0 (2026-11-03): monorepo consolidado no GitHub como
+  `Atlas_Commerce` (rename de `Atalas_Commerce`, redirect no GitHub).
+  Workflows reais na raiz: services (stack completa + realm + migrações +
+  ruff + pytest 7 pacotes), storefront (tsc/build + e2e Playwright c/
+  seed reproduzível), contracts (paths-filtered). TASK-001-008 PASS.
+  Docs sincronizadas (READMEs, requirements IMPLEMENTED com EVD,
+  traceability preenchida, OPEN-02..06 DECIDED com evidência).
+  `sdd/evidence/EVD-001-005-ci-runner.md`.
+- FASE-1 (2026-11-03): TASK-001-009 PASS — rebuild determinístico
+  fim-a-fim; imagem pg assa o bootstrap (atlas+control + TODAS as
+  migrações de leitura no primeiro boot; bake por causa de NTFS/SELinux
+  nos bind mounts). TASK-001-010 PASS — Auth Code + PKCE real no
+  storefront (PKCE S256 puro, sessão verificada via JWKS, redirect_uri
+  por Host header); Playwright 8 passed. TASK-002-013 PASS — cupons
+  (PERCENT/FIXED, escopo de mercado, mínimo), impostos por região
+  (BR/US/UE bps, floor), multi-armazém (WAREHOUSES env, hint + reserva
+  atômica); PSP fake gatilhos migram de amount p/ cartão (6666/9999).
+  Suites: order 39, control 24, psp 6, payment 21, catalog 14, offers
+  12, inventory 13; drills coupon 8/8, checkout 12/12, fulfill 5/5.
+  `sdd/evidence/EVD-001-006-rebuild.md`, `EVD-001-007-pkce.md`,
+  `EVD-002-004-pricing.md`. Próxima: FASE-2 (M4 completo).

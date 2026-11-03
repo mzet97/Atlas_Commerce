@@ -9,6 +9,6 @@
 | TASK-001-005 | Realm + roles + users | 201s, rerun 409+204 | PASS |
 | TASK-001-006 | Smoke OIDC + introspecção | roles + `active=True` | PASS |
 | TASK-001-007 | Workflows + actionlint | 3 PASS + check python | PASS |
-| TASK-001-008 | CI verde em runner | push + run verdes | TODO (sem remote) |
-| TASK-001-009 | Rebuild determinístico doc. | `down -v && up --build` + smoke | TODO |
-| TASK-001-010 | Auth Code + PKCE no browser | login real via redirect | TODO |
+| TASK-001-008 | CI verde em runner | push + run verdes | PASS (EVD-001-005) |
+| TASK-001-009 | Rebuild determinístico doc. | `down -v && up --build` + smoke | PASS (EVD-001-006) |
+| TASK-001-010 | Auth Code + PKCE no browser | login real via redirect | PASS (EVD-001-007) |

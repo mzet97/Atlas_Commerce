@@ -14,5 +14,5 @@
 | TASK-002-010 | 403 por market/warehouse | ABAC + testes + audit | PASS |
 | TASK-002-011 | Ofertas + inventário slice | owners Offer/Inventory | PASS |
 | TASK-002-012 | E2E Playwright da fatia | admin→loja em Chromium (2 passed) | PASS |
-| TASK-002-013 | Cupons/impostos/multi-armazém | regras por região | TODO (M2-next) |
+| TASK-002-013 | Cupons/impostos/multi-armazém | regras por região | PASS (EVD-002-004) |
 | TASK-002-014 | E2E checkout completo | carrinho→pagamento | PASS (M3: `checkout_e2e.py` 12 checks, EVD-003-002) |
