@@ -29,7 +29,10 @@ services:
     image: postgres:17
     environment:
       POSTGRES_PASSWORD: ${PG_PASSWORD:?set in .env}
-    volumes: ["pg-data:/var/lib/postgresql/data"]
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+      - ../../../atlas-control/control-api/migrations:/control-migrations:ro
     ports: ["5432:5432"]
     profiles: [core, data]
     healthcheck:
@@ -184,6 +187,8 @@ services:
     build: ../../../atlas-storefront/apps/storefront-next
     environment:
       DATABASE_URL: postgresql://postgres:${PG_PASSWORD:?set in .env}@pg:5432/atlas
+      KC_PUBLIC_URL: http://localhost:8180
+      KC_INTERNAL_URL: http://keycloak:8080
     ports: ["3100:3000"]
     profiles: [m2]
     depends_on:

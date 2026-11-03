@@ -26,7 +26,7 @@ for r in catalog_editor pricing_manager inventory_operator fulfillment_operator 
          finance_analyst support_agent auditor iam_admin seller_operator; do
   call POST "/atlas/roles" "{\"name\":\"$r\"}"
 done
-call POST "/atlas/clients" '{"clientId":"atlas-storefront","publicClient":true,"directAccessGrantsEnabled":true,"standardFlowEnabled":true,"redirectUris":["http://localhost:3000/*"]}'
+call POST "/atlas/clients" '{"clientId":"atlas-storefront","publicClient":true,"directAccessGrantsEnabled":true,"standardFlowEnabled":true,"redirectUris":["http://localhost:3000/*","http://localhost:3100/*"]}'
 call POST "/atlas/clients" '{"clientId":"atlas-control","publicClient":false,"secret":"atlas-control-dev-secret","serviceAccountsEnabled":true,"directAccessGrantsEnabled":true,"standardFlowEnabled":true,"redirectUris":["http://localhost:4200/*"]}'
 mkuser() { # username password role email firstname lastname (profile avoids first-login UPDATE_PROFILE)
   call POST "/atlas/users" "{\"username\":\"$1\",\"enabled\":true,\"email\":\"$4\",\"emailVerified\":true,\"firstName\":\"$5\",\"lastName\":\"$6\",\"credentials\":[{\"type\":\"password\",\"value\":\"$2\",\"temporary\":false}]}"
