@@ -1,0 +1,17 @@
+<div class="shell">
+  <aside>
+    <div class="brand">Atlas Control</div>
+    <nav>
+      <a routerLink="/">dashboard</a>
+      <a routerLink="/orders">orders</a>
+      <a routerLink="/finance">finance</a>
+      <a routerLink="/coupons">coupons</a>
+      <a routerLink="/returns">returns</a>
+    </nav>
+    <div class="session">
+      <button data-testid="signin" (click)="signIn()">entrar</button>
+      <button data-testid="signout" (click)="signOut()">sair</button>
+    </div>
+  </aside>
+  <main><router-outlet /></main>
+</div>

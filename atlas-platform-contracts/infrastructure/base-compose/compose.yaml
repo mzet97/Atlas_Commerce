@@ -439,6 +439,12 @@ services:
       timeout: 5s
       retries: 5
 
+  control-ui:
+    # Admin SPA (Angular + OIDC PKCE) talking to control-api at :8102.
+    build: ../../../atlas-control/apps/control-angular
+    ports: ["4200:80"]
+    profiles: [m2]
+
 volumes:
   mongo-data:
   pg-data:

@@ -34,7 +34,14 @@ for r in catalog_editor pricing_manager inventory_operator fulfillment_operator 
   call POST "/atlas/roles" "{\"name\":\"$r\"}"
 done
 call POST "/atlas/clients" '{"clientId":"atlas-storefront","publicClient":true,"directAccessGrantsEnabled":true,"standardFlowEnabled":true,"redirectUris":["http://localhost:3000/*","http://localhost:3100/*"]}'
-call POST "/atlas/clients" '{"clientId":"atlas-control","publicClient":false,"secret":"atlas-control-dev-secret","serviceAccountsEnabled":true,"directAccessGrantsEnabled":true,"standardFlowEnabled":true,"redirectUris":["http://localhost:4200/*"]}'
+call POST "/atlas/clients" '{"clientId":"atlas-control","publicClient":true,"directAccessGrantsEnabled":true,"standardFlowEnabled":true,"redirectUris":["http://localhost:4200/*"]}'
+# Atlas Control SPA: keep the client PUBLIC with PKCE even if an older
+# confidential version exists (dev realm: PUT overwrites).
+CTRL_ID=$(curl -s -m 15 "$API/atlas/clients?clientId=atlas-control" -H "Authorization: Bearer $T" \
+  | python3 -c "import sys,json;d=json.load(sys.stdin);print(d[0]['id'] if d else '')")
+if [ -n "$CTRL_ID" ]; then
+  call PUT "/atlas/clients/$CTRL_ID" '{"clientId":"atlas-control","publicClient":true,"directAccessGrantsEnabled":true,"standardFlowEnabled":true,"redirectUris":["http://localhost:4200/*"],"webOrigins":["http://localhost:4200"]}'
+fi
 mkuser() { # username password role email firstname lastname (profile avoids first-login UPDATE_PROFILE)
   call POST "/atlas/users" "{\"username\":\"$1\",\"enabled\":true,\"email\":\"$4\",\"emailVerified\":true,\"firstName\":\"$5\",\"lastName\":\"$6\",\"credentials\":[{\"type\":\"password\",\"value\":\"$2\",\"temporary\":false}]}"
   ID=$(curl -s -m 15 "$API/atlas/users?username=$1" -H "Authorization: Bearer $T" \
