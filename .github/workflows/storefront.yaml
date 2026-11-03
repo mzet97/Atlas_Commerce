@@ -56,9 +56,9 @@ jobs:
       - name: Prepare compose env
         run: cp "$COMPOSE_DIR/.env.example" "$COMPOSE_DIR/.env"
 
-      - name: Start full stack (m2 + m3 + storefront)
+      - name: Start full stack (core + m2 + m3 + storefront)
         working-directory: ${{ env.COMPOSE_DIR }}
-        run: docker compose --profile m2 --profile m3 up -d --build
+        run: docker compose --profile core --profile data --profile m2 --profile m3 up -d --build
 
       - name: Seed realm + scope grants
         working-directory: ${{ env.COMPOSE_DIR }}

@@ -75,7 +75,7 @@ jobs:
 
       - name: Start owner APIs (m2 + m3)
         working-directory: ${{ env.COMPOSE_DIR }}
-        run: docker compose --profile m2 --profile m3 up -d --build \
+        run: docker compose --profile data --profile m2 --profile m3 up -d --build \
           catalog-api offers-api inventory-api payment-api psp-fake order-api
 
       - name: Await owner APIs
