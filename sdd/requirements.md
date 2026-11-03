@@ -19,10 +19,15 @@ para o esquema `INV-<DOM>-<NNN>` do prompt em OPEN-01.
 | REQ-PAY-001 | PSP fake determinístico; webhook assinado e deduplicado; sem PAN/CVV | Payment | IMPLEMENTED (EVD-003-001) |
 | REQ-ADM-001 | Four-eyes acima do limite; `requested_by != approved_by` | Control | IMPLEMENTED (EVD-004-001; thresholds por valor pendentes) |
 | REQ-ADM-002 | Autorização backend por ação+escopo; 403 fora de escopo auditado | Control + owners | IMPLEMENTED (EVD-002-002/003) |
-| REQ-I18N-001 | pt-BR/en-US/es-US; mercado ≠ locale ≠ moeda; `Money` explícito | Storefront/Control | PROPOSED (M5 restante) |
-| REQ-AI-001 | IA só recomenda/propõe carrinho; compra exige confirmação em UI confiável | AI Service | PROPOSED (allowlist curada OK; assistente pendente) |
+| REQ-I18N-001 | pt-BR/en-US/es-US; mercado ≠ locale ≠ moeda; `Money` explícito | Storefront/Control | IMPLEMENTED (EVD-001-005 storefront e2e 13/13; Intl + titles JSONB) |
+| REQ-AI-001 | IA só recomenda/propõe carrinho; compra exige confirmação em UI confiável | AI Service | IMPLEMENTED (EVD-007-002: grafo doc 08, write-tools ausentes, bypass=0) |
 | REQ-CQRS-001 | Outbox mesma transação Mongo; projeção idempotente reconstruível | Todos owners | IMPLEMENTED (EVD-002-003: 2x evento → 1 linha) |
 | REQ-OBS-001 | Trace `checkout_id/order_id` com PII minimizada; dashboards por contexto | Platform | IMPLEMENTED (EVD-001-003/004) |
+| REQ-MKT-001 | Sellers registrados como tenants (iam_admin) | Control | IMPLEMENTED (EVD-010-001) |
+| REQ-MKT-002 | seller_operator publica só no próprio tenant; cross-tenant 403 auditado | Control + offers | IMPLEMENTED (EVD-010-001) |
+| REQ-MKT-003 | Oferta concorrente por (sku, seller, market); buybox menor preço | offers + storefront | IMPLEMENTED (EVD-010-001) |
+| REQ-MKT-004 | Split settlement auditável (bruto/comissão/líquido por seller) | Control | IMPLEMENTED (EVD-010-001) |
+| REQ-MKT-005 | Velocity antifraude (>5 auth/cliente/60s → FRAUD_VELOCITY) | payment | IMPLEMENTED (EVD-010-001) |
 
 ## NFRs (propostas, NÃO medidas — doc 05)
 L0 local (50 catálogo RPS / 1 checkout/s) até L4 hipótese (1M RPS / 10k+

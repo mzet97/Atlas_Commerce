@@ -1,6 +1,6 @@
 # ADR-0003 — Kafka (eventos) + RabbitMQ (tarefas)
 
-Status: PROPOSED. Data: 2026-10-27.
+Status: ACCEPTED (ratificada 2026-11-03 com evidência: EVD-006-002 (dispatcher RabbitMQ real: 45 QUEUED→SENT, quorum queue atlas.notifications)). Data original: 2026-10-27.
 
 ## Contexto
 Log de eventos de domínio (replay, analytics) vs. tarefas pontuais

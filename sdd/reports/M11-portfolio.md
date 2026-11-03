@@ -1,24 +1,29 @@
-# Atlas Commerce — Program Portfolio (M11, 2026-10-28)
+# Atlas Commerce — Program Portfolio (M11, updated 2026-11-03)
 
-Evidence-first SDD, M0→M9 executed end-to-end. Every claim below links to
-a dated evidence file with observed command output; open items are named,
-never hidden. Three repos remain uncommitted pending user review.
+Evidence-first SDD, M0→M10 executed and closed in a single monorepo
+(github.com/mzet97/Atlas_Commerce), CI green on the runner. Every claim
+below links to a dated evidence file with observed output; remaining
+limits are named, never hidden.
 
 | Milestone | Status | Proof |
 |---|---|---|
-| M0 audit | PASS | source hashes, UC/INV cross-audit, 9 discovery artifacts |
-| M1 foundation | partial PASS | compose core UP, realm + OIDC smoke, 3 CI workflows |
-| M2 catalog/offers/inventory | PASS | 14+12+13+8 tests, E2E product→stock→store, oversell=0, Playwright |
-| M3 checkout/PSP | COMPLETE | PSP fake + payment (21) + order saga (21), T01-T05 + checkout drills ALL PASS, duplicate_paid_order=0 |
-| M4 admin hardening | partial | four-eyes reconcile (maker≠checker, 403 self-approval), control 21 tests |
-| M5 search | partial | PG trigram (OPEN-05 PG-only), Playwright 5 passed |
-| M6 fulfillment | partial | CONFIRMED→SHIPPED + notification queue (transport deferred), drill 5/5 |
-| M7 AI allowlist | partial | recommendations = allowlisted∩ACTIVE only, negative test green |
-| M8 K8s | partial | 18 Deployments + 8 Services, structural gate green, NOT_DEPLOYED (no cluster) |
-| M9 benchmarks | partial | L0 measured: reads p95=4ms (n=3000), checkouts p95=143ms (n=60), 0 errors |
-| M10 3P | DEFERRED | no third-party integration started |
-| M11 portfolio | THIS FILE | milestone reports M0–M9 under `sdd/reports/` |
+| M0 audit | PASS | source hashes, UC/INV cross-audit, discovery artifacts |
+| M1 foundation | COMPLETE | compose core, realm+OIDC, root CI green on runner (TASK-001-008/009/010) — EVD-001-005/006/007 |
+| M2 catalog/offers/inventory | PASS | suites green, oversell=0, projections deterministic (pg baked initdb) |
+| M3 checkout/PSP | PASS | saga 12-check drill, duplicate_paid_order=0, HMAC webhook |
+| M4 admin hardening | COMPLETE | four-eyes + value thresholds + ops cancel + PENDING sweeper |
+| M5 storefront UX | COMPLETE | search, i18n (pt/en/es), SEO surface, pagination+facets; 13 Playwright specs |
+| M6 fulfillment | COMPLETE | ship+carrier label, refunds (PSP truth first), RMA, RabbitMQ quorum dispatcher (45 drained) |
+| M7 AI shopping | COMPLETE | LangGraph doc-08 graph, read-only tools, injection bypass=0, curation TTL/weight ranking, evals EVAL PASS |
+| M8 K8s | partial | full deploy surface (secrets script, ExternalName infra, ingress, NetPol, HPA/PDB; kubeconform 46/46) — deploy blocked by rootless host (EVD-008-002 has the revival recipe) |
+| M9 benchmarks | partial | L1 measured 83k reqs: checkout p95 148ms (SLO ✓), nav p95 2.48s @950/s single replica (SLO ✗, bottleneck named); chaos RTO 2.9s; L2/L3 blocked (no cluster) |
+| M10 marketplace 3P | COMPLETE | seller tenancy (cross-tenant 403 audited), concurrent offers + buybox, split settlement (10% commission), velocity antifraude — EVD-010-001 |
+| M11 portfolio | THIS FILE | + progress.md FASE-0..9 entries |
 
-Deferred by design (not started, not claimed): K8s deploy, L1–L4,
-refunds (no PSP refund), RabbitMQ dispatch, i18n/SEO, ML ranking,
-remotes/CI runners (no remote), commits (awaiting review).
+ADRs 0001–0007 ACCEPTED (2026-11-03) with evidence links. OPEN-01..06
+DECIDED (equivalence table in decisions-open.md).
+
+Remaining limits (named): K8s deploy + L2/L3 need a deployable cluster
+(rootless host recipe documented); navigation SLO at 950/s needs store
+replicas; M11-next candidates: multi-region, real PSP sandbox, LGPD/GDPR
+review with counsel.

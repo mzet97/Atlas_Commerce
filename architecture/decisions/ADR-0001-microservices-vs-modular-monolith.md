@@ -1,6 +1,6 @@
 # ADR-0001 — Storefront em microserviços, Control em monólito modular
 
-Status: PROPOSED. Data: 2026-10-27.
+Status: ACCEPTED (ratificada 2026-11-03 com evidência: EVD-002-001..003 (storefront owners no ar, Control + vertical), EVD-001-005 (CI), EVD-010-001 (M10)). Data original: 2026-10-27.
 
 ## Contexto
 Duas experiências com cadência distinta (loja elástica, operação auditável)

@@ -99,3 +99,40 @@
   12, inventory 13; drills coupon 8/8, checkout 12/12, fulfill 5/5.
   `sdd/evidence/EVD-001-006-rebuild.md`, `EVD-001-007-pkce.md`,
   `EVD-002-004-pricing.md`. Próxima: FASE-2 (M4 completo).
+- FASE-2 (2026-11-03): M4 completo — four-eyes com threshold por valor
+  (APPROVAL_THRESHOLD_MINOR), cancelamento operacional com four-eyes
+  (order:cancel, resource_type), sweeper de PENDING expirado
+  (compensação + settle attempt); migrações 004/005 (control).
+- FASE-3 (2026-11-03): refunds end-to-end (PSP /refunds + agregado
+  PaymentRefunded + four-eyes com payload), cancel CONFIRMED com perna
+  de dinheiro, Returns/RMA (refund + restock via ledger), dispatcher
+  RabbitMQ real (quorum queue, 45 drenadas), carrier label fake.
+  EVD-006-002.
+- FASE-4 (2026-11-03): M5 completo — i18n pt/en/es (titles JSONB +
+  Intl), SEO (canonical/hreflang/sitemap/robots), paginação + facetas;
+  13 specs Playwright. EVD-001-005 atualizada.
+- FASE-5 (2026-11-03): Control Angular (apps/control-angular) — OIDC
+  code+PKCE público, módulos orders/finance/coupons/returns, CORS,
+  compose control-ui :4200, CI control-ui job; admin.spec verde.
+- FASE-6 (2026-11-03): M7 completo — assistente LangGraph doc 08
+  (tools de leitura, bypass=0, human gate, LLM opcional), evals
+  (precision 1.00), ranking com peso/TTL/explicabilidade, busca no
+  owner catalog. EVD-007-002.
+- FASE-7 (2026-11-03): M8 increment-2 — deploy.sh (secrets do .env),
+  ExternalName infra, ingress, NetPol, HPA/PDB, kubeconform 46/46;
+  deploy bloqueado em host rootless (3 rotas tentadas; receita no
+  EVD-008-002). EVD-008-002.
+- FASE-8 (2026-11-03): M9 L1 medido (83k reqs; checkout p95 148ms ✓;
+  navegação p95 2.48s @950/s ✗ — bottleneck SSR 1 réplica), chaos
+  drill RTO 2.9s com leituras 100%; L2/L3 bloqueados sem cluster.
+  results/20261103T152532/.
+- FASE-9 (2026-11-03): M10 completo — SPEC-010 (9 artefatos), sellers
+  (tenancy, 403 auditado cross-tenant), oferta concorrente + buybox,
+  split settlement (10%), velocity antifraude (stop real ao vivo),
+  paul.seller no realm. EVD-010-001.
+- FASE-10 (2026-11-03): RATIFICAÇÃO — ADRs 0001–0007 ACCEPTED com
+  evidências; OPEN-01..06 DECIDED (tabela de equivalência INV↔DOM
+  incluída); requirements REQ-* IMPLEMENTED com EVDs (REQ-MKT-001..005
+  novos); roadmap M10 ENTREGUE; M11 portfólio atualizado. Programa
+  SDD M0→M10 fechado; limits nomeados: K8s deploy + L2/L3 (cluster),
+  nav SLO @950/s (réplicas da loja).
