@@ -407,6 +407,24 @@ services:
       rabbit: { condition: service_healthy }
     command: ["python", "-m", "atlas_order.notifier"]
 
+  assistant-api:
+    # M7 AI shopping assistant (doc 08 graph, ADR-0005 human gate).
+    # LLM optional: without LLM_BASE_URL/LLM_API_KEY the composer uses the
+    # deterministic grounded fallback. Tools are read-only by construction.
+    build: ../../../atlas-storefront/services/assistant
+    environment:
+      CATALOG_API_URL: http://catalog-api:8000
+      INVENTORY_API_URL: http://inventory-api:8000
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+      OTEL_SERVICE_NAME: atlas-assistant
+    ports: ["8107:8000"]
+    profiles: [m7]
+    depends_on:
+      catalog-api: { condition: service_started }
+
   order-projector:
     build: ../../../atlas-storefront/services/order
     environment:

@@ -160,15 +160,29 @@ export async function searchProducts(
   };
 }
 
+export type Recommendation = OfferLine & { explanation: string };
+
+/**
+ * M7 recommender read: allowlisted AND ACTIVE only, curation TTL enforced
+ * row-wise (expired entries drop out without a rewrite), deterministic
+ * ranking (curator weight + availability), light personalization (SKUs the
+ * customer already bought sink to the end), and a human-readable
+ * explanation per row. AI never mutates anything here (REQ-AI-001).
+ */
 export async function listRecommendations(
   locale: Locale = DEFAULT_LOCALE,
-): Promise<OfferLine[]> {
-  // AI surfacing contract (M7): allowlisted AND ACTIVE only. Anything not
-  // curated here never renders on /recommendations, whatever its status.
+  customerId?: string,
+): Promise<Recommendation[]> {
   const { rows } = await pool.query(
     `SELECT p.product_id, ${TITLE_EXPR} AS title, p.status, p.projection_version,
             p.updated_at, o.offer_id, o.price_minor, o.currency, o.market_id,
-            COALESCE(i.total_available, 0) AS total_available
+            COALESCE(i.total_available, 0) AS total_available,
+            a.weight,
+            EXISTS (
+              SELECT 1 FROM orders_view ov JOIN order_lines ol
+                ON ol.order_id = ov.order_id
+              WHERE ov.customer_id = $2 AND ol.sku_id = p.product_id
+            ) AS purchased
      FROM ai_allowlist a
      JOIN available_offer_view o ON o.offer_id = a.offer_id AND o.status = 'ACTIVE'
      JOIN catalog_product_search p ON p.product_id = o.sku_id
@@ -176,10 +190,23 @@ export async function listRecommendations(
        SELECT SUM(on_hand - reserved - safety_stock)::int AS total_available
        FROM inventory_availability_view WHERE sku_id = p.product_id
      ) i ON true
-     ORDER BY total_available DESC, a.added_at DESC LIMIT 10`,
-    [locale],
+     WHERE (a.expires_at IS NULL OR a.expires_at > now())
+     ORDER BY (a.weight + LEAST(COALESCE(i.total_available, 0), 20) / 20.0
+               - CASE WHEN EXISTS (
+                   SELECT 1 FROM orders_view ov JOIN order_lines ol
+                     ON ol.order_id = ov.order_id
+                   WHERE ov.customer_id = $2 AND ol.sku_id = p.product_id
+                 ) THEN 10 ELSE 0 END) DESC,
+              a.weight DESC, a.added_at DESC
+     LIMIT 10`,
+    [locale, customerId ?? ""],
   );
-  return rows;
+  return rows.map((row) => {
+    const reasons: string[] = [`curadoria (peso ${Number(row.weight).toFixed(1)})`];
+    if (Number(row.total_available) > 0) reasons.push("estoque disponível");
+    if (row.purchased) reasons.push("já comprado por você (menor prioridade)");
+    return { ...row, explanation: reasons.join(" · ") };
+  });
 }
 
 export function formatPrice(priceMinor: number | null, currency: string | null): string {

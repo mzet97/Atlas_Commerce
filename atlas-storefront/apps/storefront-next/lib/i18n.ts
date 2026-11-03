@@ -113,8 +113,12 @@ export function formatMoney(
   locale: Locale,
 ): string {
   if (priceMinor === null || currency === null) return "—";
+  // Intl inserts NBSP before/inside amounts; normalize so tests and DOM
+  // agree on plain spaces.
   return new Intl.NumberFormat(locale, { style: "currency", currency })
-    .format(priceMinor / 100);
+    .format(priceMinor / 100)
+    .replace(/\u00A0/g, " ")
+    .replace(/\u202F/g, " ");
 }
 
 export const SEO_ORIGIN =

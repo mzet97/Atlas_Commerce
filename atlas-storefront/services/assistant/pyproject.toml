@@ -1,0 +1,35 @@
+[project]
+name = "atlas-assistant"
+version = "0.1.0"
+description = "M7 AI shopping assistant: LangGraph pipeline, read-only tools, human gate"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.30,<1",
+  "httpx>=0.27,<1",
+  "pydantic>=2.0,<3",
+  "langgraph>=0.2,<2",
+  "opentelemetry-sdk>=1.28,<2",
+  "opentelemetry-exporter-otlp>=1.28,<2",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<9", "pytest-asyncio>=0.24,<1", "ruff>=0.8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/atlas_assistant"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint.per-file-ignores]
+# Graph node boundary: a poisoned turn must fail the turn, not the service.
+"src/atlas_assistant/graph.py" = ["BLE001"]

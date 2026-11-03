@@ -3,9 +3,14 @@ import { formatMoney, getLocale, t } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
-export default async function Recommendations() {
+export default async function Recommendations({
+  searchParams,
+}: {
+  searchParams: Promise<{ customer_id?: string }>;
+}) {
   const locale = await getLocale();
-  const items = await listRecommendations(locale);
+  const customerId = (await searchParams).customer_id;
+  const items = await listRecommendations(locale, customerId);
   return (
     <main>
       <h1>{t(locale, "recs.title")}</h1>
@@ -29,6 +34,9 @@ export default async function Recommendations() {
                 {p.total_available > 0
                   ? t(locale, "unit.units", { n: p.total_available })
                   : t(locale, "unit.unavailable")}
+              </div>
+              <div className="pid" data-testid="explanation">
+                {p.explanation}
               </div>
             </li>
           ))}
