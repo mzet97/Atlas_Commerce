@@ -169,3 +169,10 @@ acima) ou kubeconfig externo.
   (uma linha, receita acima) ou kubeconfig externo, o deploy em cluster
   é fisicamente impossível nesta máquina.** Manifests, harness e receitas
   permanecem prontos para o primeiro momento em que a credencial exista.
+
+
+## Usernetes (última alternativa avaliada — 2026-11-03)
+Usernetes gen3 (`gen3-v20260902.0`) publica **sem binários de release**
+(assets vazio) — exigiria build de source completo. Caminho não seguido
+por custo/risco. O desbloqueio definitivo permanece o comando root único
+documentado acima.
