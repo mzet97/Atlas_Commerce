@@ -1,12 +1,14 @@
-import { formatPrice, listRecommendations } from "@/lib/db";
+import { listRecommendations } from "@/lib/db";
+import { formatMoney, getLocale, t } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
 export default async function Recommendations() {
-  const items = await listRecommendations();
+  const locale = await getLocale();
+  const items = await listRecommendations(locale);
   return (
     <main>
-      <h1>Recomendados (curadoria AI allowlist)</h1>
+      <h1>{t(locale, "recs.title")}</h1>
       <p className="note">
         Somente ofertas ativas e curadas aparecem aqui. A disponibilidade é
         indicativa: o checkout revalida no Inventory autoritativo (INV-CQRS-001).
@@ -18,13 +20,15 @@ export default async function Recommendations() {
           {items.map((p) => (
             <li key={p.offer_id ?? p.product_id}>
               <div>
-                <strong>{p.title || "(sem título)"}</strong>
+                <strong>{p.title}</strong>
                 <span className="st">{p.status}</span>
               </div>
               <div>
-                {formatPrice(p.price_minor, p.currency)}
+                {formatMoney(p.price_minor, p.currency, locale)}
                 {" · "}
-                {p.total_available > 0 ? `${p.total_available} un.` : "indisponível"}
+                {p.total_available > 0
+                  ? t(locale, "unit.units", { n: p.total_available })
+                  : t(locale, "unit.unavailable")}
               </div>
             </li>
           ))}

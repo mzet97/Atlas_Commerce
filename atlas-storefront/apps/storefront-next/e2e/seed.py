@@ -57,12 +57,13 @@ def _token(user: str, pwd: str) -> str:
         return json.loads(resp.read().decode())["access_token"]
 
 
-def seed_product(cara: dict[str, str], title: str, price_minor: int,
+def seed_product(cara: dict[str, str], titles: dict[str, str], price_minor: int,
                  qty: int, seller: str, allow: bool) -> None:
     """Product -> publish -> offer -> stock (+ allowlist)."""
+    title = titles["pt-BR"]
     tag = f"{time.time_ns()}"
     s, product = _call(CONTROL, "POST", "/ops/products", {
-        "title": {"pt-BR": title}, "idempotency_key": f"seed-p-{tag}",
+        "title": titles, "idempotency_key": f"seed-p-{tag}",
         "correlation_id": f"seed-{tag}"}, cara)
     assert s == 201, (title, s, product)
     sku = product["id"]
@@ -87,39 +88,56 @@ def seed_product(cara: dict[str, str], title: str, price_minor: int,
     print(f"PASS seed {title} offer={offer['id']}", flush=True)
 
 
-def _store(path: str) -> str:
-    with urllib.request.urlopen(f"{STORE}{path}", timeout=15) as resp:
+def _store(path: str, cookie: str = "") -> str:
+    headers = {"Cookie": cookie} if cookie else {}
+    req = urllib.request.Request(f"{STORE}{path}", headers=headers)
+    with urllib.request.urlopen(req, timeout=15) as resp:
         return resp.read().decode()
 
 
 def await_convergence() -> None:
     """Poll the storefront until all seeded projections are visible."""
     deadline = time.time() + 120
-    home = search = recs = ""
+    home = search = recs = es_home = ""
     while time.time() < deadline:
         try:
             home = _store("/")
             search = _store("/search?q=Cafeteira")
             recs = _store("/recommendations")
-            if ("Cafeteira M2" in home and "129.90 BRL" in home
+            es_home = _store("/", cookie="atlas_locale=es-ES")
+            if ("Cafeteira M2" in home and "R$ 129,90" in home
                     and "7 un." in home and "Cafeteira M2" in search
-                    and "Cafeteira M2" in recs):
+                    and "Cafeteira M2" in recs and "Cafetera M2" in es_home):
                 break
         except urllib.error.URLError:
             pass  # storefront warming up
         time.sleep(3)
-    check("home-lists-cafeteira", "Cafeteira M2" in home and "129.90 BRL" in home
+    check("home-lists-cafeteira", "Cafeteira M2" in home and "R$ 129,90" in home
           and "7 un." in home, "")
     check("search-finds-cafeteira", "Cafeteira M2" in search, "")
     check("recs-allowlist-only", "Cafeteira M2" in recs
           and "Item M6" not in recs and "Item Ship" not in recs, "")
+    check("es-locale-title", "Cafetera M2" in es_home, "")
 
 
 def main() -> None:
     cara = {"Authorization": f"Bearer {_token('cara.catalog', 'cara-dev-only')}"}
-    seed_product(cara, "Cafeteira M2", 12990, 7, "e2e-main", allow=True)
-    seed_product(cara, "Item M6", 500, 5, "e2e-m6", allow=False)
-    seed_product(cara, "Item Ship", 700, 5, "e2e-ship", allow=False)
+    seed_product(
+        cara,
+        {"pt-BR": "Cafeteira M2", "en-US": "M2 Coffee Maker",
+         "es-ES": "Cafetera M2"},
+        12990, 7, "e2e-main", allow=True,
+    )
+    seed_product(
+        cara,
+        {"pt-BR": "Item M6", "en-US": "M6 Item", "es-ES": "Artículo M6"},
+        500, 5, "e2e-m6", allow=False,
+    )
+    seed_product(
+        cara,
+        {"pt-BR": "Item Ship", "en-US": "Ship Item", "es-ES": "Envío Item"},
+        700, 5, "e2e-ship", allow=False,
+    )
     await_convergence()
     print("ALL PASS (seed ready)", flush=True)
 

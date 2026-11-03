@@ -50,15 +50,17 @@ async def apply_event(pool: asyncpg.Pool, raw: bytes) -> bool:
             title = payload.get("title") or {}
             await conn.execute(
                 "INSERT INTO catalog_product_search"
-                "(product_id, title, status, projection_version)"
-                " VALUES ($1, $2, $3, $4)"
+                "(product_id, title, titles, status, projection_version)"
+                " VALUES ($1, $2, $3::jsonb, $4, $5)"
                 " ON CONFLICT (product_id) DO UPDATE SET"
-                " title=EXCLUDED.title, status=EXCLUDED.status,"
+                " title=EXCLUDED.title, titles=EXCLUDED.titles,"
+                " status=EXCLUDED.status,"
                 " projection_version=EXCLUDED.projection_version"
                 " WHERE catalog_product_search.projection_version"
                 " < EXCLUDED.projection_version",
                 envelope.aggregate_id,
                 title.get("pt-BR", ""),
+                json.dumps({str(k): str(v) for k, v in title.items()}),
                 payload.get("status", ""),
                 envelope.aggregate_version,
             )
