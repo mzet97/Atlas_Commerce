@@ -208,6 +208,7 @@ class Order:
     tax_rate_bps: int = 0
     market_id: str = ""
     coupon_code: str | None = None
+    created_at: str | None = None
     events: list[DomainEvent] = field(default_factory=list, repr=False)
 
     @classmethod
@@ -242,6 +243,7 @@ class Order:
             tax_rate_bps=quote.tax_rate_bps,
             market_id=quote.market_id,
             coupon_code=quote.coupon_code,
+            created_at=datetime.now(UTC).isoformat(),
         )
         order.events.append(
             new_event("OrderPlaced", order_id, 1, correlation_id, order._payload())

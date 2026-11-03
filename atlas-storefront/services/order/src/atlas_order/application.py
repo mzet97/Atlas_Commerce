@@ -384,6 +384,28 @@ async def handle_ship(
     return await repo.save_with_events(order)
 
 
+async def handle_ops_cancel(
+    repo: MongoOrderRepository, order_id: str, correlation_id: str
+) -> Order:
+    """Operational cancel (M4): PENDING only, reservations released.
+
+    CONFIRMED cancellation is a money event (refund) — refused here until
+    the refund flow lands (M6). Terminal orders return idempotently.
+    """
+    order = await repo.get(OrderId(order_id))
+    if order.status in domain.TERMINAL:
+        return order
+    if order.status == domain.CONFIRMED:
+        raise domain.InvalidTransition(status=order.status, event="ops cancel")
+    async with httpx.AsyncClient(base_url=_inventory_base(), timeout=15) as http_inv:
+        try:
+            await _release_all(http_inv, order, correlation_id)
+        except DownstreamError:
+            return order  # reservations stay; retry
+    order.cancel("cancelled by ops", _corr(correlation_id))
+    return await repo.save_with_events(order)
+
+
 async def handle_reconcile(
     repo: MongoOrderRepository,
     order_id: str,

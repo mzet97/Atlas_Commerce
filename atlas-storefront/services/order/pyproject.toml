@@ -39,3 +39,4 @@ line-length = 100
 # the loop. Catch-all is the documented purpose here, not a missed case.
 "src/atlas_order/relay.py" = ["BLE001"]
 "src/atlas_order/projector.py" = ["BLE001"]
+"src/atlas_order/sweeper.py" = ["BLE001", "S112"]

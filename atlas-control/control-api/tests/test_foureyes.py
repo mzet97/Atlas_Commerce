@@ -45,9 +45,9 @@ async def _unknown_intent() -> dict[str, object]:
             json={
                 "order_id": unique("order"),
                 "customer_id": unique("cust"),
-                "amount_minor": 999,
+                "amount_minor": 999, 
                 "currency": "BRL",
-                "card_last4": "4242",
+                "card_last4": "9999",
                 "idempotency_key": unique("idem"),
                 "correlation_id": unique("corr"),
             },
@@ -108,7 +108,7 @@ class TestFourEyes:
         assert response.status_code == 200, response.text
         body = response.json()
         assert body["status"] == "EXECUTED"
-        assert body["intent"]["status"] == "AUTHORIZED"  # owner truth applied
+        assert body["target"]["status"] == "AUTHORIZED"  # owner truth applied
         pending = await api.get("/ops/finance/approvals/pending",
                                 headers=_auth(checker))
         assert approval["approval_id"] not in [

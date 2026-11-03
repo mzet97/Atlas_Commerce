@@ -98,7 +98,7 @@ class TestFinanceGate:
     async def test_analyst_files_reconcile_request(self, api: AsyncClient) -> None:
         """Given UNKNOWN / When analyst requests / Then 202 PENDING, no move."""
         token = await user_token("erin.finance", "erin-dev-only")
-        intent = await _create_intent(amount=999)
+        intent = await _create_intent(amount=1999, card="9999")
         assert intent["status"] == "UNKNOWN"  # PSP 500 keeps ref, truth pending
         response = await api.post(
             f"/ops/finance/payments/{intent['id']}/reconcile",

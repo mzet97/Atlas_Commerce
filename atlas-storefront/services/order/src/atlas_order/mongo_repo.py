@@ -162,6 +162,7 @@ class MongoOrderRepository:
             "tax_rate_bps": o.tax_rate_bps,
             "market_id": o.market_id,
             "coupon_code": o.coupon_code,
+            "created_at": o.created_at,
         }
 
     @staticmethod
@@ -191,7 +192,22 @@ class MongoOrderRepository:
             tax_rate_bps=int(doc.get("tax_rate_bps", 0)),  # type: ignore[arg-type]
             market_id=str(doc.get("market_id", "")),
             coupon_code=str(coupon) if coupon else None,
+            created_at=(str(doc["created_at"]) if doc.get("created_at") else None),
         )
+
+    async def list_pending_created_before(self, cutoff_iso: str) -> list[Order]:
+        """PENDING orders placed before the cutoff (expiration sweeper).
+
+        Orders predating `created_at` tracking (None) never expire — the
+        sweeper only claims what it can age deterministically.
+        """
+        cursor = self._db.orders.find(
+            {
+                "status": domain.PENDING,
+                "created_at": {"$lt": cutoff_iso, "$ne": None},
+            }
+        )
+        return [self._load(doc) async for doc in cursor]
 
     async def place_with_quote(self, order: Order, quote_id: QuoteId) -> Order:
         """Consume the quote once AND persist PENDING + OrderPlaced, one txn.

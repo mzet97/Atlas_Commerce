@@ -12,6 +12,9 @@ os.environ.setdefault("OFFERS_API_URL", "http://localhost:8103")
 os.environ.setdefault("INVENTORY_API_URL", "http://localhost:8104")
 os.environ.setdefault("PAYMENT_API_URL", "http://localhost:8105")
 os.environ.setdefault("ORDER_API_URL", "http://localhost:8106")
+# Four-eyes always in suites: the smallest value keeps every fixture at or
+# above the threshold; threshold tests override explicitly.
+os.environ.setdefault("APPROVAL_THRESHOLD_MINOR", "1")
 os.environ.setdefault(
     "ATLAS_PG_DSN", "postgresql://postgres:atlas-pg-dev-only@localhost:5432/atlas"
 )

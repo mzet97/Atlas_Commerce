@@ -1,16 +1,21 @@
-"""order_ops module: coupon pricing rules for the checkout (order owner).
+"""order_ops module: coupon rules + operational order commands (order owner).
 
-Requires pricing_manager AND a market grant when the coupon is scoped to
-a market. Coupons live in the order owner's Mongo; Control never stores
-canonical pricing state (ADR-0006).
+Coupons require pricing_manager (market scope when scoped). Order cancel
+requires fulfillment_operator; at or above the value threshold it takes
+four eyes (a different finance_analyst checks), below it one operator
+executes now. Control never stores canonical order state (ADR-0006).
 """
 
 from __future__ import annotations
 
+import uuid
+
+import asyncpg
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
+from .audit import log_action
 from .command_channel import (
     ScopeGrant,
     allowed,
@@ -18,10 +23,13 @@ from .command_channel import (
     forward,
     gate,
     json_out,
+    threshold_minor,
 )
 
-router = APIRouter(prefix="/ops/coupons")
+router = APIRouter(prefix="/ops")
 PRICING_MANAGER = "pricing_manager"
+FULFILLMENT_OPERATOR = "fulfillment_operator"
+CANCEL_ACTION = "order:cancel"
 
 
 class CouponIn(BaseModel):
@@ -41,11 +49,23 @@ class DeactivateCouponIn(BaseModel):
     correlation_id: str
 
 
+class OrderCommandIn(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    correlation_id: str
+
+
+def _pool(request: Request) -> asyncpg.Pool:
+    pool = request.app.state.pool
+    assert isinstance(pool, asyncpg.Pool)
+    return pool
+
+
 def _scopes(market_id: str | None) -> list[ScopeGrant] | None:
     return [ScopeGrant(scope_type="market", scope_id=market_id)] if market_id else None
 
 
-@router.post("", status_code=201)
+@router.post("/coupons", status_code=201)
 async def upsert_coupon(body: CouponIn, request: Request) -> JSONResponse:
     """Pricing manager creates a coupon rule (optionally market-scoped)."""
     token = await gate(
@@ -76,7 +96,7 @@ async def upsert_coupon(body: CouponIn, request: Request) -> JSONResponse:
     return json_out(coupon, status)
 
 
-@router.get("")
+@router.get("/coupons")
 async def list_coupons(request: Request) -> JSONResponse:
     """Any pricing_manager reads the rules (authenticate-only gate)."""
     token = await authenticate(request)
@@ -84,7 +104,7 @@ async def list_coupons(request: Request) -> JSONResponse:
     return JSONResponse(coupons, status_code=status)
 
 
-@router.post("/{code}/deactivate")
+@router.post("/coupons/{code}/deactivate")
 async def deactivate_coupon(
     code: str, body: DeactivateCouponIn, request: Request
 ) -> JSONResponse:
@@ -123,3 +143,75 @@ async def _coupon_market(request: Request, code: str) -> str | None:
             market = coupon.get("market_id")
             return str(market) if market else None
     return None
+
+
+# -- operational order commands (M4) ------------------------------------
+
+
+@router.post("/orders/{order_id}/cancel")
+async def cancel_order(
+    order_id: str, body: OrderCommandIn, request: Request
+) -> JSONResponse:
+    """Operator cancels an order; above the value threshold, four eyes.
+
+    Below APPROVAL_THRESHOLD_MINOR the requesting operator executes now
+    (audited); at or above it the request is FILED and a different
+    finance_analyst approves before the owner command runs.
+    """
+    token = await gate(
+        request, CANCEL_ACTION, order_id, body.correlation_id,
+        FULFILLMENT_OPERATOR, None,
+    )
+    status, order = await forward(
+        request, "order_url", "GET", f"/orders/{order_id}", {}, token
+    )
+    total = int(order.get("total_minor", 0)) if status == 200 else 0  # type: ignore[arg-type]
+    if status == 200 and total < threshold_minor():
+        status, cancelled = await forward(
+            request,
+            "order_url",
+            "POST",
+            f"/orders/{order_id}/cancel",
+            {"correlation_id": body.correlation_id},
+            token,
+        )
+        if status == 200:
+            await allowed(
+                request, token, CANCEL_ACTION, order_id, body.correlation_id
+            )
+        return json_out(cancelled, status)
+    approval_id = f"apr-{uuid.uuid4().hex[:12]}"
+    try:
+        row = await _pool(request).fetchrow(
+            "INSERT INTO finance_approvals"
+            "(id, action, intent_id, requested_by, request_correlation_id,"
+            " resource_type) VALUES ($1, $2, $3, $4, $5, 'order') RETURNING *",
+            approval_id,
+            CANCEL_ACTION,
+            order_id,
+            token.subject,
+            body.correlation_id,
+        )
+    except asyncpg.UniqueViolationError:
+        await log_action(
+            _pool(request),
+            actor_sub=token.subject,
+            action=CANCEL_ACTION,
+            resource_type="approval",
+            resource_id=order_id,
+            result="denied",
+            correlation_id=body.correlation_id,
+        )
+        return JSONResponse({"detail": "cancel already pending"}, status_code=409)
+    assert row is not None
+    await allowed(request, token, CANCEL_ACTION, order_id, body.correlation_id)
+    return JSONResponse(
+        {
+            "approval_id": row["id"],
+            "action": row["action"],
+            "resource_type": row["resource_type"],
+            "status": row["status"],
+            "requested_by": row["requested_by"],
+        },
+        status_code=202,
+    )

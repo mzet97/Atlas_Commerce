@@ -17,20 +17,25 @@ from . import application, domain
 from .application import CheckoutCommand
 from .domain import Cart, CartId, OrderId, QuoteId
 from .mongo_repo import MongoOrderRepository
+from .sweeper import expire_pending_loop
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Owner client + read-model pool per running loop; closed on shutdown."""
+    import asyncio
+
     client = AsyncIOMotorClient(os.environ["MONGO_URL"])
     repo = MongoOrderRepository(client, os.getenv("ORDER_DB", "order"))
     await repo.ensure_indexes()
     pool = await asyncpg.create_pool(os.environ["PG_DSN"], min_size=1, max_size=5)
     app.state.repo = repo
     app.state.pool = pool
+    sweeper = asyncio.create_task(expire_pending_loop(repo))
     try:
         yield
     finally:
+        sweeper.cancel()
         await pool.close()
         client.close()
 
@@ -124,6 +129,7 @@ def _order_body(order: domain.Order) -> dict[str, object]:
         "reservation_ids": list(order.reservation_ids),
         "payment_intent_id": order.payment_intent_id,
         "failure_reason": order.failure_reason,
+        "created_at": order.created_at,
     }
 
 
@@ -300,6 +306,21 @@ async def ship_order(
 ) -> JSONResponse:
     """Fulfillment handoff CONFIRMED -> SHIPPED. Idempotent replay 200."""
     order = await application.handle_ship(
+        _repo(request), order_id, body.correlation_id
+    )
+    return JSONResponse(_order_body(order))
+
+
+@app.post("/orders/{order_id}/cancel")
+async def cancel_order(
+    order_id: str, body: ReconcileRequest, request: Request
+) -> JSONResponse:
+    """Operational cancel (M4, reached via Control four-eyes above threshold).
+
+    PENDING -> CANCELLED with reservations released; terminal replay
+    returns the order; CONFIRMED is refused until refunds land (M6).
+    """
+    order = await application.handle_ops_cancel(
         _repo(request), order_id, body.correlation_id
     )
     return JSONResponse(_order_body(order))

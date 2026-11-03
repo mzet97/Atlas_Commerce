@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict
 
 from .audit import log_action
 from .auth import Forbidden
-from .command_channel import allowed, forward, gate, json_out
+from .command_channel import allowed, forward, gate, json_out, threshold_minor
 
 router = APIRouter(prefix="/ops/finance")
 FINANCE_ANALYST = "finance_analyst"
@@ -58,6 +58,7 @@ def _approval_body(row: asyncpg.Record) -> dict[str, object]:
     return {
         "approval_id": row["id"],
         "action": row["action"],
+        "resource_type": row["resource_type"],
         "intent_id": row["intent_id"],
         "status": row["status"],
         "requested_by": row["requested_by"],
@@ -78,14 +79,35 @@ async def view_payment(intent_id: str, request: Request) -> JSONResponse:
     return json_out(intent, status)
 
 
-@router.post("/payments/{intent_id}/reconcile", status_code=202)
+@router.post("/payments/{intent_id}/reconcile")
 async def request_reconcile(
     intent_id: str, body: ReconcileIn, request: Request
 ) -> JSONResponse:
-    """Maker: file a reconcile request. Nothing moves until approved."""
+    """Maker files a reconcile; below threshold ONE analyst executes now.
+
+    Value threshold (APPROVAL_THRESHOLD_MINOR): intents under it may be
+    reconciled by the requesting analyst directly (still audited); at or
+    above it, nothing moves until a DIFFERENT analyst approves.
+    """
     token = await gate(
         request, RECONCILE_ACTION, intent_id, body.correlation_id, FINANCE_ANALYST, None
     )
+    status, intent = await _owner_get(request, f"/intents/{intent_id}")
+    amount = int(intent.get("amount_minor", 0)) if status == 200 else 0  # type: ignore[arg-type]
+    if amount < threshold_minor():
+        status, intent = await forward(
+            request,
+            "payment_url",
+            "POST",
+            f"/intents/{intent_id}/reconcile",
+            {"correlation_id": body.correlation_id},
+            token,
+        )
+        if status == 200:
+            await allowed(
+                request, token, RECONCILE_ACTION, intent_id, body.correlation_id
+            )
+        return json_out(intent, status)
     approval_id = f"apr-{uuid.uuid4().hex[:12]}"
     try:
         row = await _pool(request).fetchrow(
@@ -154,14 +176,24 @@ async def approve(
             correlation_id=body.correlation_id,
         )
         raise Forbidden("maker cannot check its own request")
-    status, intent = await forward(
-        request,
-        "payment_url",
-        "POST",
-        f"/intents/{row['intent_id']}/reconcile",
-        {"correlation_id": body.correlation_id},
-        token,
-    )
+    if row["action"] == "order:cancel":
+        status, target = await forward(
+            request,
+            "order_url",
+            "POST",
+            f"/orders/{row['intent_id']}/cancel",
+            {"correlation_id": body.correlation_id},
+            token,
+        )
+    else:
+        status, target = await forward(
+            request,
+            "payment_url",
+            "POST",
+            f"/intents/{row['intent_id']}/reconcile",
+            {"correlation_id": body.correlation_id},
+            token,
+        )
     if status == 200:
         result, exec_status = "EXECUTED", status
     else:
@@ -178,7 +210,7 @@ async def approve(
     await allowed(
         request, token, "approval:decide", approval_id, body.correlation_id
     )
-    return json_out({**_approval_body(updated), "intent": intent}, status)
+    return json_out({**_approval_body(updated), "target": target}, status)
 
 
 @router.post("/approvals/{approval_id}/reject")

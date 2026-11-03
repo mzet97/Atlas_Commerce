@@ -10,6 +10,8 @@ os.environ.setdefault(
     "mongodb://localhost:27017/order_test?replicaSet=rs0&directConnection=true",
 )
 os.environ.setdefault("ORDER_DB", "order_test")
+# Sweeper must not race suites: only expiration tests shorten the TTL.
+os.environ.setdefault("ORDER_PENDING_TTL_SECONDS", "1800")
 os.environ.setdefault("OTEL_SDK_DISABLED", "true")
 os.environ.setdefault("INVENTORY_API_URL", "http://localhost:8104")
 os.environ.setdefault("PAYMENT_API_URL", "http://localhost:8105")

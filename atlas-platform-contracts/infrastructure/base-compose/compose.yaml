@@ -179,6 +179,7 @@ services:
       ORDER_API_URL: http://localhost:8106
       ATLAS_PG_DSN: postgresql://postgres:${PG_PASSWORD:?set in .env}@localhost:5432/atlas
       CONTROL_PG_DSN: postgresql://postgres:${PG_PASSWORD:?set in .env}@localhost:5432/control
+      APPROVAL_THRESHOLD_MINOR: "100000"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost:4319
       OTEL_SERVICE_NAME: atlas-control
     profiles: [m2]

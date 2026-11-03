@@ -7,6 +7,8 @@ VERIFIED subject, and forward the command untouched (owner codes pass through).
 
 from __future__ import annotations
 
+import os
+
 import httpx
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -14,6 +16,14 @@ from pydantic import BaseModel, ConfigDict
 
 from .audit import log_action
 from .auth import Forbidden, InvalidToken, TokenInfo, require_role, verify_bearer
+
+
+def threshold_minor() -> int:
+    """Four-eyes applies at or above this value; below, one operator suffices.
+
+    Value read per call: tests and compose override independently.
+    """
+    return int(os.getenv("APPROVAL_THRESHOLD_MINOR", "100000"))
 
 
 class Unauthorized(Exception):
