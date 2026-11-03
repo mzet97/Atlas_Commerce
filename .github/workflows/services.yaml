@@ -73,15 +73,14 @@ jobs:
             docker compose exec -T pg psql -U postgres -d control -v ON_ERROR_STOP=1 < "$f"
           done
 
-      - name: Start owner APIs (m2 + m3)
+      - name: Start full stack (core + data + m2 + m3)
         working-directory: ${{ env.COMPOSE_DIR }}
-        run: docker compose --profile data --profile m2 --profile m3 up -d --build \
-          catalog-api offers-api inventory-api payment-api psp-fake order-api
+        run: docker compose --profile core --profile data --profile m2 --profile m3 up -d --build
 
-      - name: Await owner APIs
+      - name: Await stack
         run: |
           set -e
-          for port in 8101 8103 8104 8105 8106 8190; do
+          for port in 8100 8101 8103 8104 8105 8106 8190 8102; do
             for i in $(seq 1 60); do
               curl -sf -m 5 "http://localhost:$port/health" >/dev/null && break
               sleep 3
