@@ -1,0 +1,19 @@
+{
+  "stage": "L1 (compose lab)",
+  "navigation_rate_rps": 950,
+  "checkout_rate_rps": 20,
+  "checkout_p95_ms": 148.3,
+  "checkout_p90_ms": 127.1,
+  "navigation_p95_ms": 2482.4,
+  "navigation_med_ms": 88.2,
+  "total_http_requests": 83462,
+  "checks_rate": 1.0,
+  "verdict": {
+    "checkout_slo": "PASS (p95 148.3ms < 1500ms; saga completa; crossed=false)",
+    "navigation_slo": "FAIL at 950/s single-replica compose (p95 2482ms, med 88ms -> tail saturation; bottleneck = Next SSR 1 replica; crossed=true)",
+    "action": "horizontal replicas / SSR cache before declaring L1 nav SLO"
+  },
+  "l2_l3": "BLOCKED: no deployable cluster on this rootless host (see EVD-008-002); doc-05 methodology ready (k6 scripts parameterized by stage)",
+  "checkout_slo_1500ms_crossed": false,
+  "navigation_slo_400ms_crossed": true
+}

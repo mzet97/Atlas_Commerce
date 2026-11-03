@@ -1,0 +1,9 @@
+{
+  "commit": "ec981fd23e2e78b5d325a6f3e7591e3d23d89417",
+  "kernel": "7.2.11-ogc4.1.fc44.x86_64",
+  "cpus": 24,
+  "mem_gb": 62.7,
+  "replicas": "compose scale=1 per service",
+  "dataset": "10^1 seeded SKUs + 1 hot SKU (4k units)",
+  "tool": "k6 1.8.2 constant-arrival-rate"
+}
