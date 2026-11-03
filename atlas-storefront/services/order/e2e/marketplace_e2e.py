@@ -101,7 +101,7 @@ def main() -> None:
     check("M02-concurrent-3p-offer", s == 201, f"{s}")
 
     # M03: cross-tenant refusal.
-    s, denied = _call(CONTROL, "POST", "/ops/offers", {
+    s, _denied = _call(CONTROL, "POST", "/ops/offers", {
         "sku_id": sku, "seller_id": "seller-outro", "market_id": "BR",
         "channel": "web", "currency": "BRL", "price_minor": 100,
         "idempotency_key": f"o3-{tag}", "correlation_id": f"c-{tag}"}, paul)

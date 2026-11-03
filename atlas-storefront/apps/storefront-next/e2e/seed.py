@@ -126,17 +126,17 @@ def main() -> None:
         cara,
         {"pt-BR": "Cafeteira M2", "en-US": "M2 Coffee Maker",
          "es-ES": "Cafetera M2"},
-        12990, 7, "e2e-main", allow=True,
+        12990, 7, "atlas", allow=True,
     )
     seed_product(
         cara,
         {"pt-BR": "Item M6", "en-US": "M6 Item", "es-ES": "Artículo M6"},
-        500, 5, "e2e-m6", allow=False,
+        500, 5, "atlas", allow=False,
     )
     seed_product(
         cara,
         {"pt-BR": "Item Ship", "en-US": "Ship Item", "es-ES": "Envío Item"},
-        700, 5, "e2e-ship", allow=False,
+        700, 5, "atlas", allow=False,
     )
     await_convergence()
     print("ALL PASS (seed ready)", flush=True)
