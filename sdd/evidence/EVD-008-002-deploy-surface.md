@@ -129,3 +129,25 @@ dois, e ambos dependem de credencial que só o usuário possui:
 Artefato adicional pronto para o primeiro cluster disponível:
 `infrastructure/k8s/island/island-checkout.yaml` (5 pods hostNetwork do
 caminho de checkout, imagens importadas via `podman save | ctr import`).
+
+
+## Investigação de desbloqueio #3 (sessão final — limite do kernel atingido)
+Com a árvore do usuário em estado controlado (subtree_control VAZIO na
+raiz, um único containerd com snapshotter native, um único kubelet
+standalone):
+- `mkdir /sys/fs/cgroup/k8s.io` → `cgroup.controllers` do filho =
+  `cpu pids` (herda APENAS o que a raiz habilita; `cpuset memory io`
+  nunca descem);
+- mover processo para dentro de `/k8s.io` com controllers habilitados no
+  próprio grupo → EINVAL "invalid state" (no-internal-process); com a
+  raiz vazia, runc/containerd RE-habilita `cpu pids` na raiz durante o
+  enable-walk e o ciclo se repete;
+- `echo +memory +io` na raiz → `Operation not supported` (kernel
+  `7.2.11-ogc4.1` nega a delegação desses controladores para a árvore do
+  usuário — comportamento de kernel customizado, não configurável sem
+  root do host).
+O stack containerd→runc→kubelet exige a cadeia completa de controllers
+(cpu cpuset memory io pids) delegada; com `cpu pids` apenas, nenhum pod
+cria sandbox — bloqueio NO NÍVEL DO KERNEL, intransponível sob o usuário
+mzet. As duas rotas válidas permanecem: root do host (uma vez, receita
+acima) ou kubeconfig externo.
