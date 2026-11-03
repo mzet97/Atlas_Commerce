@@ -10,9 +10,9 @@
 | TASK-002-006 | Control-api + audit próprio | 4 testes verdes | PASS |
 | TASK-002-007 | 403 customer + audit denied | 403 + linha `denied` | PASS |
 | TASK-002-008 | Storefront lê projeção | título publicado em `:3100` | PASS |
-| TASK-002-009 | Estado PUBLISHING na UI | badge via `?v=` | PASS (auto por versão: TODO M2-next) |
+| TASK-002-009 | Estado PUBLISHING na UI | badge via `?v=` | PASS |
 | TASK-002-010 | 403 por market/warehouse | ABAC + testes + audit | PASS |
 | TASK-002-011 | Ofertas + inventário slice | owners Offer/Inventory | PASS |
 | TASK-002-012 | E2E Playwright da fatia | admin→loja em Chromium (2 passed) | PASS |
 | TASK-002-013 | Cupons/impostos/multi-armazém | regras por região | TODO (M2-next) |
-| TASK-002-014 | E2E checkout completo | carrinho→pagamento | TODO (M3) |
+| TASK-002-014 | E2E checkout completo | carrinho→pagamento | PASS (M3: `checkout_e2e.py` 12 checks, EVD-003-002) |

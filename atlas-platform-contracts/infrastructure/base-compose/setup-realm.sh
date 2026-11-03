@@ -52,10 +52,21 @@ curl -s -m 15 -o /dev/null -w "map cara.catalog->inventory_operator -> %{http_co
   "$API/atlas/users/$ID/role-mappings/realm" \
   -H "Authorization: Bearer $T" -H "Content-Type: application/json" -d "[$ROLE]"
 # Scope grants live in the Control database (resolved by verified sub).
+# psql goes through the compose pg container: plain docker where available
+# (CI/standard hosts), distrobox-host-exec on this dev workstation.
+psql_exec() {
+  if command -v docker >/dev/null 2>&1; then
+    docker exec -i atlas-base-pg-1 psql "$@"
+  elif command -v distrobox-host-exec >/dev/null 2>&1; then
+    distrobox-host-exec docker exec -i atlas-base-pg-1 psql "$@"
+  else
+    echo "no docker CLI: scope grants NOT seeded" >&2; return 0
+  fi
+}
 if [ -n "${PG_PASSWORD:-}" ]; then
   for scope in "market|BR" "warehouse|W1"; do
     st=${scope%%|*}; sid=${scope##*|}
-    distrobox-host-exec docker exec -i atlas-base-pg-1 psql -U postgres -d control \
+    psql_exec -U postgres -d control \
       -c "INSERT INTO scope_grants(actor_sub, scope_type, scope_id) VALUES ('$ID', '$st', '$sid') ON CONFLICT DO NOTHING;" \
       2>&1 | tail -n 1
   done

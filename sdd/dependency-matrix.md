@@ -14,7 +14,8 @@ Versões observadas na execução, não congeladas. Locks pinam no bootstrap.
 | mermaid-cli | 12.0.0 via npx | render 10/10 OK | VERIFIED |
 | PlantUML | 1.2025.0 | `-checkonly` 2/2 OK | VERIFIED |
 | Angular CLI (`ng`) | ausente | `command -v ng` vazio | TODO (M1-next: `npm i -g @angular/cli`) |
-| buf | ausente | `command -v buf` vazio | TODO (M1-next: install + `buf lint/breaking`) |
+| buf | 1.75.0 | `buf --version` | VERIFIED (CI usa quando protos existirem) |
+| actionlint | 1.7.12 | CI root workflows PASS | VERIFIED |
 
 Regra: nunca `latest` em manifests de produção; SBOM + lockfiles no bootstrap
 de cada serviço. FastAPI/Pydantic/Mongo-driver e demais libs Python serão

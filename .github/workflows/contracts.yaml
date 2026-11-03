@@ -1,23 +1,37 @@
 name: contracts
-on: { push: {}, pull_request: {} }
+
+on:
+  push:
+    branches: [main]
+    paths: ["atlas-platform-contracts/**"]
+  pull_request:
+    paths: ["atlas-platform-contracts/**"]
+
+concurrency:
+  group: contracts-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - name: Install PyYAML
+        run: python3 -m pip install --quiet pyyaml
       - name: Parse all contract YAML and enforce event envelope fields
         run: |
           python3 - <<'EOF'
           import glob, sys, yaml
           required = {"event_id","event_type","aggregate_id","aggregate_version",
                       "occurred_at","schema_version","correlation_id"}
-          files = glob.glob("contracts/**/*.yaml", recursive=True)
+          files = glob.glob("atlas-platform-contracts/contracts/**/*.yaml", recursive=True)
           assert files, "no contract files found"
           for f in files:
               with open(f) as fh:
                   yaml.safe_load(fh)
               print("parsed", f)
-          env = open("contracts/asyncapi/domain-event-envelope.yaml").read()
+          env = open("atlas-platform-contracts/contracts/asyncapi/domain-event-envelope.yaml").read()
           missing = [k for k in required if k not in env]
           assert not missing, f"envelope missing {missing}"
           print("envelope fields OK:", sorted(required))

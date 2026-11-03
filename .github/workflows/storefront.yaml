@@ -1,0 +1,114 @@
+name: storefront
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**/*.md"]
+  pull_request:
+    paths-ignore: ["**/*.md"]
+
+concurrency:
+  group: storefront-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  COMPOSE_DIR: atlas-platform-contracts/infrastructure/base-compose
+  APP_DIR: atlas-storefront/apps/storefront-next
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: atlas-storefront/apps/storefront-next
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: atlas-storefront/apps/storefront-next/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm exec next build
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: atlas-storefront/apps/storefront-next/pnpm-lock.yaml
+
+      - name: Prepare compose env
+        run: cp "$COMPOSE_DIR/.env.example" "$COMPOSE_DIR/.env"
+
+      - name: Start full stack (m2 + m3 + storefront)
+        working-directory: ${{ env.COMPOSE_DIR }}
+        run: docker compose --profile m2 --profile m3 up -d --build
+
+      - name: Seed realm + scope grants
+        working-directory: ${{ env.COMPOSE_DIR }}
+        run: |
+          set -a; . ./.env; set +a
+          export KC_URL=http://localhost:8180
+          bash setup-realm.sh
+
+      - name: Create app databases + apply control migrations
+        working-directory: ${{ env.COMPOSE_DIR }}
+        run: |
+          set -e
+          docker compose exec -T pg psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='atlas'" | grep -q 1 \
+            || docker compose exec -T pg createdb -U postgres atlas
+          docker compose exec -T pg psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='control'" | grep -q 1 \
+            || docker compose exec -T pg createdb -U postgres control
+          for f in "$GITHUB_WORKSPACE"/atlas-control/control-api/migrations/*.sql; do
+            echo "applying $f"
+            docker compose exec -T pg psql -U postgres -d control -v ON_ERROR_STOP=1 < "$f"
+          done
+
+      - name: Await stack
+        run: |
+          set -e
+          for target in 8101 8103 8104 8105 8106 8190 8102; do
+            for i in $(seq 1 60); do
+              curl -sf -m 5 "http://localhost:$target/health" >/dev/null && break
+              sleep 3
+            done
+            curl -sf -m 5 "http://localhost:$target/health" \
+              || { echo "API on :$target never healthy"; exit 1; }
+            echo "API :$target healthy"
+          done
+          for i in $(seq 1 60); do
+            curl -sf -m 5 "http://localhost:3100/" >/dev/null && break
+            sleep 3
+          done
+          curl -sf -m 5 "http://localhost:3100/" || { echo "storefront never ready"; exit 1; }
+
+      - name: Seed E2E dataset
+        run: python3 "$APP_DIR/e2e/seed.py"
+
+      - name: Playwright
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+          pnpm e2e
+
+      - name: Compose logs on failure
+        if: failure()
+        working-directory: ${{ env.COMPOSE_DIR }}
+        run: docker compose logs --tail 80 || true
