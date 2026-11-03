@@ -1,0 +1,14 @@
+{
+  "stage": "soak 10min @900 nav RPS / 18 checkouts/s (compose lab)",
+  "http_reqs": 554594,
+  "checkout_p95_ms": 92.9,
+  "checkout_slo_1500ms_crossed": false,
+  "nav_p95_ms": 3060.4,
+  "nav_slo_400ms_crossed": true,
+  "checks_rate": 0.6201,
+  "verdict": {
+    "checkout": "SOAK-STABLE p95 93ms over 10min/554k reqs; most checkouts hit FRAUD_VELOCITY after the per-customer 5/60s cap (202 stops in the projection, by design) — sustained-traffic decline path measured; stock committed 0, oversell=0",
+    "navigation": "saturated at 900/s single replica over time (checks 62%) — known bottleneck",
+    "post_probes": "orders_view=30330, payment_intents=6609, velocity stops=202, oversell=0"
+  }
+}

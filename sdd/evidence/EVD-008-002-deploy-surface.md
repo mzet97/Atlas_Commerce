@@ -33,20 +33,53 @@ A máquina inteira é rootless (sem sudo), então NENHUM runtime consegue:
 3. **k3s `--rootless` binário nativo**: `net.ipv4.ip_forward` exige
    `sudo sysctl` — indisponível.
 
-## Receita de reanimação (executar COM sudo uma única vez)
+## Receita de reanimação (EXECUTADA nesta sessão com sudo local — ver
+## "Investigação final" abaixo)
+A investigação final (com sudo local) refinou a causa-raiz: **o controlador
+`cpuset` não está delegado na árvore systemd-user** (user@1000.service
+delega apenas cpu/io/memory/pids/dmem) e o kubelet exige cpuset no cgroup
+v2 — mas `net.ipv4.ip_forward` é namespaced (gravável num netns próprio,
+como provado: `unshare -n` + write = OK). Receita correta com sudo do
+HOST (a de baixo é do usuário, insuficiente para cpuset):
 ```sh
-# rootless podman + k3s:
-sudo sysctl -w net.ipv4.ip_forward=1
-sudo loginctl enable-linger mzet
-mkdir -p ~/.config/systemd/user/@.service.d
-printf '[Service]\nDelegate=yes\n' > ~/.config/systemd/user/@.service.d/delegate.conf
-systemctl --user daemon-reload
-# então recriar o container k3s com --cgroupns=host --device /dev/kmsg
-# e kubelet-arg feature-gates=KubeletInUserNamespace=true (testado até o
-# limite rootless; os passos acima removem os três bloqueios registrados)
-# deploy: ENV_FILE=... ./deploy.sh   (ou DRY_RUN='--dry-run=server' antes)
+# 1) delegar TODOS os controladores (inclusive cpuset) para a árvore do usuário:
+sudo mkdir -p /etc/systemd/system/user@1000.service.d
+printf '[Service]\nDelegate=cpu cpuset io memory pids hugetlb\n' \
+  | sudo tee /etc/systemd/system/user@1000.service.d/50-delegate.conf
+sudo systemctl daemon-reload
+sudo systemctl restart user@1000.service   # encerra processos do usuário!
+
+# 2) recriar o k3s (podman rootless, privileged):
+podman rm -f atlas-k3s
+podman run -d --name atlas-k3s --privileged \
+  -p 127.0.0.1:16443:6443 -p 127.0.0.1:30080:30080 \
+  -v atlas-k3s-data:/var/lib/rancher/k3s -v atlas-k3s-output:/output \
+  -e K3S_KUBECONFIG_OUTPUT=/output/kubeconfig.yaml \
+  -e K3S_KUBECONFIG_MODE=644 rancher/k3s:v1.31.5-k3s1 server
+
+# 3) export KUBECONFIG=/var/home/mzet/.local/share/containers/storage/
+#    volumes/atlas-k3s-output/_data/kubeconfig.yaml && ./deploy.sh
 ```
-Alternativa não-root: executar o deploy num cluster gerenciado de teste
+
+## Investigação final desta sessão (2026-11-03, sudo local disponível)
+- `sudo -n` funciona NO CONTAINER ZCode (passwordless) mas o kernel é o
+  do host via distrobox: **user namespace** (uid_map 0→1) + netns inicial
+  → sysctl host (`ip_forward`) e veth no netns host: EPERM definitivo.
+- Netns PRÓPRIO: `unshare -n` → `ip_forward=1` gravável (net sysctl é
+  namespaced) + slirp4netns anexado (tap0 10.0.2.100, internet OK).
+- k3s NATIVO dentro do netns (com `cgroups-per-qos=false`,
+  `KubeletInUserNamespace=true`): fatal **"failed to find cpuset cgroup
+  (v2)"** — k3s valida cpuset no pre-flight, intransponível sem cpuset
+  delegado (o `cgroups-per-qos=false` do kubelet não afeta o pre-flight
+  do k3s).
+- Delegação user-systemd testada: drop-ins user-1000.slice/app.slice/
+  session.slice + `Delegate=yes` em serviço transiente → controllers =
+  `cpu io memory pids dmem` (**cpuset NUNCA desce**: falta no
+  user@1000.service pai, que é unidade do HOST systemd).
+- Conclusão: kubelet não roda sob o usuário mzet neste host; a receita
+  acima (root do host, uma vez) é o caminho, ou cluster externo.
+
+## Alternativa não-root: executar o deploy num cluster gerenciado de teste
 (kind/k3d numa VM com kernel ajustado, ou managed k8s).
 
 ## Como reproduzir a validação

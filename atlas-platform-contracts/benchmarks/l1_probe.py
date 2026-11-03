@@ -67,7 +67,7 @@ def seed_hot_sku() -> tuple[str, str, int]:
                 {"expected_version": 1, "correlation_id": f"b-{tag}"}, cara)
     assert s == 200, _
     s, offer = call(CONTROL, "POST", "/ops/offers", {
-        "sku_id": sku, "seller_id": "bench", "market_id": "BR", "channel": "web",
+        "sku_id": sku, "seller_id": "atlas", "market_id": "BR", "channel": "web",
         "currency": "BRL", "price_minor": 199,
         "idempotency_key": f"b-{tag}", "correlation_id": f"b-{tag}"}, cara)
     assert s == 201, offer
