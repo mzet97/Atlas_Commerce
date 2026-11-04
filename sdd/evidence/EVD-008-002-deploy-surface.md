@@ -247,3 +247,22 @@ máquina sem que o usuário execute manualmente, com sua senha:
 Depois desse comando (uma única vez), o `unlock-cluster.sh` completa o
 deploy + smoke + L2/L3 automaticamente. Alternativa: kubeconfig de
 cluster externo (managed k8s, VM cloud, qualquer máquina com root).
+
+
+## RESULTADO FINAL DA INVESTIGAÇÃO (2026-11-03, conclusão da sessão)
+Após 4 rodadas de investigação e todas as rotas de usuário esgotadas, a
+causa-raiz definitiva está provada ao nível de kernel:
+
+O kernel `7.2.11-ogc4.1` do host Fedora nega delegação de cpuset/memory/io
+para processos dentro de user namespaces (ENOTS no `cgroup.subtree_control`).
+O sudo do host requer senha indisponível na sessão. O Docker/Podman daemon
+roda dentro de uma user namespace — containers privilegiados herdam essa
+restrição e não podem escrever em diretórios init-owned (`/etc/systemd`,
+`/run`, `/var/log`).
+
+**M8 é parcial por design do ambiente** — a superfície de deploy está
+completa (kubeconform 46/46, native snapshotter, ExternalName infra,
+delegation drop-in pronto). O deploy em cluster requer host root (uma vez,
+receita documentada acima) ou um cluster externo. **M9 L1 e teto foram
+medidos** (checkout p95 148ms SLO ✓ em compose; 225k reqs no k8s1);
+**L2/L3 requerem a topologia multi-node que o ambiente não fornece.**
