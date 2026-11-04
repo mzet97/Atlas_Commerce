@@ -1,0 +1,163 @@
+# Atlas checkout path — deploy no cluster k8s1 (k3s v1.36, 192.168.1.51).
+# 5 owners do checkout como Deployments (ClusterIP) + NodePorts para a
+# carga k6 na LAN. Infra (mongo/pg/kafka) é o compose da máquina
+# 192.168.1.11 (mesma LAN, portas publicadas) via env externo.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: atlas
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-api
+  namespace: atlas
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: catalog-api } }
+  template:
+    metadata: { labels: { app: catalog-api } }
+    spec:
+      containers:
+        - name: catalog
+          image: docker.io/library/atlas-base-catalog-api:latest
+          imagePullPolicy: Never
+          command: ["uvicorn", "atlas_catalog.main:app", "--host", "0.0.0.0", "--port", "8101"]
+          env:
+            - { name: MONGO_URL, value: "mongodb://192.168.1.11:27017/catalog?replicaSet=rs0&directConnection=true" }
+            - { name: KAFKA_BOOTSTRAP, value: "192.168.1.11:29092" }
+            - { name: PG_DSN, value: "postgresql://postgres:atlas-pg-dev-only@192.168.1.11:5432/atlas" }
+            - { name: OTEL_SDK_DISABLED, value: "true" }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: catalog-api, namespace: atlas }
+spec:
+  type: NodePort
+  selector: { app: catalog-api }
+  ports: [{ port: 8101, nodePort: 30101, targetPort: 8101 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-api
+  namespace: atlas
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: inventory-api } }
+  template:
+    metadata: { labels: { app: inventory-api } }
+    spec:
+      containers:
+        - name: inventory
+          image: docker.io/library/atlas-base-inventory-api:latest
+          imagePullPolicy: Never
+          command: ["uvicorn", "atlas_inventory.main:app", "--host", "0.0.0.0", "--port", "8104"]
+          env:
+            - { name: MONGO_URL, value: "mongodb://192.168.1.11:27017/inventory?replicaSet=rs0&directConnection=true" }
+            - { name: KAFKA_BOOTSTRAP, value: "192.168.1.11:29092" }
+            - { name: PG_DSN, value: "postgresql://postgres:atlas-pg-dev-only@192.168.1.11:5432/atlas" }
+            - { name: OTEL_SDK_DISABLED, value: "true" }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: inventory-api, namespace: atlas }
+spec:
+  type: NodePort
+  selector: { app: inventory-api }
+  ports: [{ port: 8104, nodePort: 30104, targetPort: 8104 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: psp-fake
+  namespace: atlas
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: psp-fake } }
+  template:
+    metadata: { labels: { app: psp-fake } }
+    spec:
+      containers:
+        - name: psp
+          image: docker.io/library/atlas-base-psp-fake:latest
+          imagePullPolicy: Never
+          command: ["uvicorn", "atlas_psp_fake.app:app", "--host", "0.0.0.0", "--port", "8190"]
+          env:
+            - { name: PSP_CALLBACK_URL, value: "http://192.168.1.51:30105/webhooks/psp" }
+            - { name: PSP_WEBHOOK_SECRET, value: "psp-dev-secret-change-me" }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: psp-fake, namespace: atlas }
+spec:
+  type: NodePort
+  selector: { app: psp-fake }
+  ports: [{ port: 8190, nodePort: 30190, targetPort: 8190 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-api
+  namespace: atlas
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: payment-api } }
+  template:
+    metadata: { labels: { app: payment-api } }
+    spec:
+      containers:
+        - name: payment
+          image: docker.io/library/atlas-base-payment-api:latest
+          imagePullPolicy: Never
+          command: ["uvicorn", "atlas_payment.main:app", "--host", "0.0.0.0", "--port", "8105"]
+          env:
+            - { name: MONGO_URL, value: "mongodb://192.168.1.11:27017/payment?replicaSet=rs0&directConnection=true" }
+            - { name: KAFKA_BOOTSTRAP, value: "192.168.1.11:29092" }
+            - { name: PG_DSN, value: "postgresql://postgres:atlas-pg-dev-only@192.168.1.11:5432/atlas" }
+            - { name: PSP_BASE_URL, value: "http://192.168.1.51:30190" }
+            - { name: PSP_TIMEOUT_SECONDS, value: "10" }
+            - { name: PSP_WEBHOOK_SECRET, value: "psp-dev-secret-change-me" }
+            - { name: OTEL_SDK_DISABLED, value: "true" }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: payment-api, namespace: atlas }
+spec:
+  type: NodePort
+  selector: { app: payment-api }
+  ports: [{ port: 8105, nodePort: 30105, targetPort: 8105 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-api
+  namespace: atlas
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: order-api } }
+  template:
+    metadata: { labels: { app: order-api } }
+    spec:
+      containers:
+        - name: order
+          image: docker.io/library/atlas-base-order-api:latest
+          imagePullPolicy: Never
+          command: ["uvicorn", "atlas_order.main:app", "--host", "0.0.0.0", "--port", "8106"]
+          env:
+            - { name: MONGO_URL, value: "mongodb://192.168.1.11:27017/order?replicaSet=rs0&directConnection=true" }
+            - { name: KAFKA_BOOTSTRAP, value: "192.168.1.11:29092" }
+            - { name: PG_DSN, value: "postgresql://postgres:atlas-pg-dev-only@192.168.1.11:5432/atlas" }
+            - { name: INVENTORY_API_URL, value: "http://192.168.1.51:30104" }
+            - { name: PAYMENT_API_URL, value: "http://192.168.1.51:30105" }
+            - { name: WAREHOUSES, value: "W1,W2" }
+            - { name: ORDER_PENDING_TTL_SECONDS, value: "1800" }
+            - { name: OTEL_SDK_DISABLED, value: "true" }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: order-api, namespace: atlas }
+spec:
+  type: NodePort
+  selector: { app: order-api }
+  ports: [{ port: 8106, nodePort: 30106, targetPort: 8106 }]
